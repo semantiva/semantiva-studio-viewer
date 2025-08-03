@@ -1,0 +1,10 @@
+pipeline:
+  nodes:
+    # start with a payload (data + context) fed in by the test harness
+    - processor: FloatMultiplyOperation
+      parameters:
+        factor: 2.5
+    - processor: FloatCollectValueProbe
+      context_keyword: doubled_value
+    - processor: FloatCollectionSumOperation
+    - processor: FloatPayloadSink

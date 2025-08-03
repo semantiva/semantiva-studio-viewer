@@ -1,0 +1,46 @@
+[project]
+name = "semantiva-studio-viewer"
+dynamic = ["version"]
+description = "A standalone package for interactive visualization of Semantiva pipelines and component hierarchies."
+license = "Apache-2.0"
+readme = "README.md"
+requires-python = ">=3.10.12"
+dependencies = [
+    "semantiva",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+    "httpx>=0.24.0",
+    "rdflib>=6.0.0",
+]
+distribution = true
+
+[tool.black]
+# Configuration for the black code formatter
+
+[tool.pylint]
+# Configuration for pylint (static analysis)
+max-line-length = 120  
+fail-under = 7.5
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["semantiva_studio_viewer"]
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm.scripts]
+serve-pipeline = "python -m semantiva_studio_viewer.cli serve-pipeline"
+serve-components = "python -m semantiva_studio_viewer.cli serve-components"  
+export-pipeline = "python -m semantiva_studio_viewer.cli export-pipeline"
+export-components = "python -m semantiva_studio_viewer.cli export-components"
+
+[tool.pdm.version]
+source = "file"
+path = "version.txt"
+
+[tool.setuptools]
+include = ["NOTICE", "LICENSE", "README.md"]

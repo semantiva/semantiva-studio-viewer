@@ -1,0 +1,11 @@
+pipeline:
+  nodes:
+  - processor: FloatMultiplyOperation
+    parameters:
+      factor: 2.5
+  - processor: FloatCollectValueProbe
+    context_keyword: doubled_value
+  - processor: FloatMultiplyOperation
+    parameters:
+      factor: 3.0
+  - processor: FloatPayloadSink
