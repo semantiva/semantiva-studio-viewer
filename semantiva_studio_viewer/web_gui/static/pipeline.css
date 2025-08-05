@@ -296,6 +296,42 @@ body, html { margin:0; height:100%; }
       border-left: 5px solid #eeeeee;
     }
 
+    .param-label.left-anchor-default {
+      background: white;
+      border: 1px solid #ff9800;
+      border-radius: 4px;
+      padding: 2px 4px;
+      font-size: 12px;
+      white-space: nowrap;
+      position: relative;
+    }
+    
+    .param-label.left-anchor-default::before {
+      content: '';
+      position: absolute;
+      right: -6px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 0;
+      height: 0;
+      border-top: 6px solid transparent;
+      border-bottom: 6px solid transparent;
+      border-left: 6px solid #ff9800;
+    }
+    
+    .param-label.left-anchor-default::after {
+      content: '';
+      position: absolute;
+      right: -5px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 0;
+      height: 0;
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+      border-left: 5px solid white;
+    }
+
     .param-label.created-key {
       background: #e8f5e8;
       border: 1px solid #4caf50;

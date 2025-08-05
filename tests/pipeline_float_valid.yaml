@@ -3,9 +3,8 @@ pipeline:
   - processor: FloatMultiplyOperation
     parameters:
       factor: 2.5
+  - processor: FloatMultiplyOperationWithDefault
   - processor: FloatCollectValueProbe
-    context_keyword: doubled_value
-  - processor: FloatMultiplyOperation
-    parameters:
-      factor: 3.0
+    context_keyword: factor
+  - processor: FloatMultiplyOperationWithDefault
   - processor: FloatPayloadSink

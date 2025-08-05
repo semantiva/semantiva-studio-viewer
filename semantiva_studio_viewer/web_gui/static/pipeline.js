@@ -24,7 +24,8 @@
         registerAnchors(node.id, anchors);
       }, [node.id, node.data.contextParams.length, registerAnchors]);
 
-      const paramCount = (node.data.pipelineConfigParams ? node.data.pipelineConfigParams.length : 0) || 0;
+      const paramCount = ((node.data.pipelineConfigParams ? node.data.pipelineConfigParams.length : 0) || 0) + 
+                         ((node.data.defaultParams ? node.data.defaultParams.length : 0) || 0);
       const nodeWidthToUse = pos.type === 'source-sink' ? 450 : width;
 
       const labelParts = node.data.label.split('\n');
@@ -161,6 +162,14 @@
                 {param}
               </div>
             ))}
+            {(node.data.defaultParams || []).map((param, i) => (
+              <div
+                key={param}
+                className="param-label left-anchor-default"
+              >
+                {param}
+              </div>
+            ))}
           </div>
         </div>
       );
@@ -246,8 +255,10 @@
           .filter(n => n.data.label.match(/Context|Rename|Delete/))
           .map(n => anchorMap[n.id].node.width);
         const configWidths = nodes.map(n => {
-          const params = n.data.pipelineConfigParams;
-          return params.length ? Math.max(...params.map(p => p.length)) : 80;
+          const configParams = n.data.pipelineConfigParams || [];
+          const defaultParams = n.data.defaultParams || [];
+          const allParams = [...configParams, ...defaultParams];
+          return allParams.length ? Math.max(...allParams.map(p => p.length)) : 80;
         });
         const maxData = Math.max(nodeWidth, ...dataWidths);
         const maxCtx = Math.max(nodeWidth, ...ctxWidths, 0);
@@ -502,11 +513,27 @@
             const map = {};
             const n = data.nodes.map((node, idx) => {
               map[node.id] = node;
+              
+              // Create parameter data with source information for visual display
+              const configParams = [];
+              const defaultParams = [];
+              
+              // Parameters from pipeline configuration
+              if (node.parameter_resolution && node.parameter_resolution.from_pipeline_config) {
+                configParams.push(...Object.keys(node.parameter_resolution.from_pipeline_config));
+              }
+              
+              // Parameters from processor defaults
+              if (node.parameter_resolution && node.parameter_resolution.from_processor_defaults) {
+                defaultParams.push(...Object.keys(node.parameter_resolution.from_processor_defaults));
+              }
+              
               return {
                 id: String(node.id),
                 data: {
                   label: node.label + "\n" + (node.input_type || '') + (node.output_type ? ' → ' + node.output_type : ''),
-                  pipelineConfigParams: node.pipelineConfigParams || [],
+                  pipelineConfigParams: configParams,
+                  defaultParams: defaultParams,
                   contextParams: node.contextParams || [],
                   createdKeys: node.created_keys || [],
                   errors: node.errors || [], // Include error information
@@ -805,9 +832,45 @@
                             border: '1px solid #bbdefb',
                             fontSize: '12px'
                           }}>
-                            {Object.entries(nodeInfo.parameter_resolution.from_pipeline_config).map(([key, value]) => (
+                            {Object.entries(nodeInfo.parameter_resolution.from_pipeline_config).map(([key, details]) => (
                               <div key={key} style={{marginBottom: '3px'}}>
-                                <span style={{fontWeight: 'bold'}}>{key}:</span> {value}
+                                <span style={{fontWeight: 'bold'}}>{key}:</span> {
+                                  typeof details === 'object' && details.value !== undefined ? 
+                                    details.value + (details.source === 'default' ? ' [default]' : '') :
+                                    details
+                                }
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{
+                            background: '#f8f9fa',
+                            padding: '8px',
+                            borderRadius: '4px',
+                            color: '#666',
+                            fontSize: '12px'
+                          }}>None</div>
+                        )}
+                      </div>
+                      
+                      {/* Parameters from processor defaults */}
+                      <div style={{marginTop: '10px'}}>
+                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#ff9800'}}>From Processor Defaults:</p>
+                        {Object.keys(nodeInfo.parameter_resolution.from_processor_defaults || {}).length > 0 ? (
+                          <div style={{
+                            background: '#fff3e0', 
+                            padding: '8px', 
+                            borderRadius: '4px',
+                            border: '1px solid #ffcc02',
+                            fontSize: '12px'
+                          }}>
+                            {Object.entries(nodeInfo.parameter_resolution.from_processor_defaults).map(([key, details]) => (
+                              <div key={key} style={{marginBottom: '3px'}}>
+                                <span style={{fontWeight: 'bold'}}>{key}:</span> {
+                                  typeof details === 'object' && details.value !== undefined ? 
+                                    details.value :
+                                    details
+                                }
                               </div>
                             ))}
                           </div>
@@ -835,11 +898,17 @@
                           }}>
                             {Object.entries(nodeInfo.parameter_resolution.from_context).map(([key, details]) => (
                               <div key={key} style={{marginBottom: '3px'}}>
-                                <span style={{fontWeight: 'bold'}}>{key}:</span> {details.source !== "Initial Context" ? (
-                                  <span>From <span style={{color: '#7b1fa2', fontWeight: 'bold'}}>Node {details.source_idx}</span></span>
-                                ) : (
-                                  <span>From <span style={{color: '#d32f2f', fontWeight: 'bold'}}>Initial Context</span></span>
-                                )}
+                                <span style={{fontWeight: 'bold'}}>{key}:</span> {
+                                  typeof details === 'object' && details.source !== undefined ? (
+                                    details.source !== "Initial Context" ? (
+                                      <span>From <span style={{color: '#7b1fa2', fontWeight: 'bold'}}>Node {details.source_idx}</span></span>
+                                    ) : (
+                                      <span>From <span style={{color: '#d32f2f', fontWeight: 'bold'}}>Initial Context</span></span>
+                                    )
+                                  ) : (
+                                    details
+                                  )
+                                }
                               </div>
                             ))}
                           </div>
