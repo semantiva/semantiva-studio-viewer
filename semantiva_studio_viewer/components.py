@@ -80,7 +80,7 @@ def build_component_json(ttl_path: str) -> Dict[str, Any]:
             "docstring": str(g.value(cls, SMTV.docString) or ""),
             "input_type": str(g.value(cls, SMTV.inputDataType) or ""),
             "output_type": str(g.value(cls, SMTV.outputDataType) or ""),
-            "parameters": str(g.value(cls, SMTV.inputParameters) or ""),
+            "parameters": str(g.value(cls, SMTV.parameters) or ""),
         }
         mapping[cls] = node_id
         nodes.append(node)

@@ -1,5 +1,95 @@
     const { useState, useEffect } = React;
 
+    // Resizable panel hook
+    function useResizable(initialWidth, minWidth = 200, maxWidth = 600) {
+      const [width, setWidth] = useState(initialWidth);
+      const [isResizing, setIsResizing] = useState(false);
+      const startX = React.useRef(0);
+      const startWidth = React.useRef(0);
+
+      const handleMouseDown = React.useCallback((e) => {
+        setIsResizing(true);
+        startX.current = e.clientX;
+        startWidth.current = width;
+        e.preventDefault();
+      }, [width]);
+
+      const handleMouseMove = React.useCallback((e) => {
+        if (!isResizing) return;
+        
+        const deltaX = e.clientX - startX.current;
+        const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth.current + deltaX));
+        setWidth(newWidth);
+      }, [isResizing, minWidth, maxWidth]);
+
+      const handleMouseUp = React.useCallback(() => {
+        setIsResizing(false);
+      }, []);
+
+      React.useEffect(() => {
+        if (isResizing) {
+          document.addEventListener('mousemove', handleMouseMove);
+          document.addEventListener('mouseup', handleMouseUp);
+          document.body.style.cursor = 'ew-resize';
+          document.body.style.userSelect = 'none';
+          
+          return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+          };
+        }
+      }, [isResizing, handleMouseMove, handleMouseUp]);
+
+      return { width, isResizing, handleMouseDown };
+    }
+
+    // Resizable panel hook for right panel (details)
+    function useResizableRight(initialWidth, minWidth = 200, maxWidth = 500) {
+      const [width, setWidth] = useState(initialWidth);
+      const [isResizing, setIsResizing] = useState(false);
+      const startX = React.useRef(0);
+      const startWidth = React.useRef(0);
+
+      const handleMouseDown = React.useCallback((e) => {
+        setIsResizing(true);
+        startX.current = e.clientX;
+        startWidth.current = width;
+        e.preventDefault();
+      }, [width]);
+
+      const handleMouseMove = React.useCallback((e) => {
+        if (!isResizing) return;
+        
+        const deltaX = startX.current - e.clientX; // Reversed for right panel
+        const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth.current + deltaX));
+        setWidth(newWidth);
+      }, [isResizing, minWidth, maxWidth]);
+
+      const handleMouseUp = React.useCallback(() => {
+        setIsResizing(false);
+      }, []);
+
+      React.useEffect(() => {
+        if (isResizing) {
+          document.addEventListener('mousemove', handleMouseMove);
+          document.addEventListener('mouseup', handleMouseUp);
+          document.body.style.cursor = 'ew-resize';
+          document.body.style.userSelect = 'none';
+          
+          return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+          };
+        }
+      }, [isResizing, handleMouseMove, handleMouseUp]);
+
+      return { width, isResizing, handleMouseDown };
+    }
+
     function TreeNode({ node, depth, onSelect, selectedId }) {
       const isSelected = selectedId === node.id;
       const componentTypeClass = getComponentTypeClass(node.component_type);
@@ -119,6 +209,10 @@
       const [showPrivateComponents, setShowPrivateComponents] = useState(false);
       const [enabledGroups, setEnabledGroups] = useState(new Set());
 
+      // Resizable panels
+      const sidebar = useResizable(400, 200, 600);
+      const details = useResizableRight(300, 200, 500);
+
       useEffect(() => {
         fetch('/api/components').then(r => r.json()).then(d => {
           setData(d);
@@ -162,7 +256,14 @@
 
       return (
         <div style={{display:'flex', height:'100%', width:'100%'}}>
-          <div id="sidebar">
+          <div id="sidebar" style={{ 
+            width: `${sidebar.width}px`,
+            position: 'relative'
+          }}>
+            <div 
+              className={`resize-handle resize-handle-right ${sidebar.isResizing ? 'resizing' : ''}`}
+              onMouseDown={sidebar.handleMouseDown}
+            />
             <h3>Semantiva Components</h3>
             {Object.entries(filteredGroups).map(([type, list]) => (
               <div key={type} className={`component-group ${getGroupClass(type)}`}>
@@ -219,7 +320,14 @@
               ))}
             </div>
           </div>
-          <div id="details">
+          <div id="details" style={{ 
+            width: `${details.width}px`,
+            position: 'relative'
+          }}>
+            <div 
+              className={`resize-handle resize-handle-left ${details.isResizing ? 'resizing' : ''}`}
+              onMouseDown={details.handleMouseDown}
+            />
             {selected ? (
               <div>
                 <h3>{selected.label}</h3>

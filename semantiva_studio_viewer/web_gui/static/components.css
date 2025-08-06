@@ -1,15 +1,110 @@
-    body, html { margin:0; height:100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    #root { display:flex; height:100%; width:100%; }
-    #sidebar { width:400px; border-right:1px solid #ccc; overflow:auto; padding:4px; background: #f8f9fa; }
-    #details { width:300px; border-left:1px solid #ccc; overflow:auto; padding:20px; background: #ffffff; }
-    #graph { flex:1; overflow:auto; position: relative; background: #fafafa; }
+    /* Semantiva Studio Color Palette - Professional & Intuitive */
+:root {
+  /* Core Channel Colors */
+  --config-primary: #8e8e93;
+  --config-light: #f2f2f7;
+  --config-border: #d1d1d6;
+  
+  --data-primary: #007aff;
+  --data-light: #e8f4fd;
+  --data-border: #c7e0f4;
+  
+  --context-primary: #af52de;
+  --context-light: #f5e6ff;
+  --context-border: #e6ccff;
+  
+  /* I/O Flow Colors */
+  --input-primary: #34c759;
+  --input-light: #e8f5ea;
+  --input-border: #c3e6cd;
+  
+  --output-primary: #ff9500;
+  --output-light: #fff4e6;
+  --output-border: #ffe0b3;
+  
+  /* System Colors */
+  --neutral-primary: #48484a;
+  --neutral-light: #f8f9fa;
+  --neutral-border: #e5e5ea;
+  
+  --success-primary: #30d158;
+  --warning-primary: #ff9f0a;
+  --error-primary: #ff3b30;
+  
+  /* Semantic Colors for Data Types */
+  --type-primary: #5856d6;
+  --type-light: #eeecff;
+  --type-border: #d4d2ff;
+}
+
+body, html { 
+  margin:0; 
+  height:100%; 
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+  background: var(--neutral-light);
+}
+#root { display:flex; height:100%; width:100%; }
+#sidebar { 
+  width:400px; 
+  min-width: 200px;
+  max-width: 600px;
+  border-right:1px solid var(--neutral-border); 
+  overflow:auto; 
+  padding:4px; 
+  background: white;
+  position: relative;
+}
+#details { 
+  width:300px; 
+  min-width: 200px;
+  max-width: 500px;
+  border-left:1px solid var(--neutral-border); 
+  overflow:auto; 
+  padding:20px; 
+  background: white;
+  position: relative;
+}
+#graph { flex:1; overflow:auto; position: relative; background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); }
+
+/* Resize handles */
+.resize-handle {
+  position: absolute;
+  background: transparent;
+  transition: background-color 0.2s ease;
+  z-index: 1000;
+}
+
+.resize-handle:hover {
+  background-color: var(--data-primary);
+}
+
+.resize-handle-right {
+  top: 0;
+  right: -2px;
+  width: 4px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.resize-handle-left {
+  top: 0;
+  left: -2px;
+  width: 4px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.resize-handle:active,
+.resize-handle.resizing {
+  background-color: var(--data-primary);
+}
     
     /* Main header styling */
     .graph-header {
       padding: 15px 20px;
-      border-bottom: 2px solid #ddd;
-      background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      border-bottom: 2px solid var(--neutral-border);
+      background: linear-gradient(135deg, white 0%, var(--neutral-light) 100%);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -17,7 +112,7 @@
     
     .graph-header-content h3 {
       margin: 0;
-      color: #007acc;
+      color: var(--type-primary);
       font-size: 18px;
       font-weight: 600;
     }
@@ -25,7 +120,7 @@
     .graph-header-content p {
       margin: 5px 0 0 0;
       font-size: 12px;
-      color: #666;
+      color: var(--neutral-primary);
     }
     
     .header-controls {
@@ -68,10 +163,10 @@
     /* Sidebar styling */
     #sidebar h3 {
       margin: 15px 10px 10px 10px;
-      color: #007acc;
+      color: var(--type-primary);
       font-size: 16px;
       font-weight: 600;
-      border-bottom: 2px solid #007acc;
+      border-bottom: 2px solid var(--type-primary);
       padding-bottom: 5px;
     }
     
@@ -104,12 +199,12 @@
       transform: scale(1.2);
     }
     
-    /* Component type colors */
-    .group-data-processor h4 { background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%); }
-    .group-context-processor h4 { background: linear-gradient(135deg, #7b1fa2 0%, #6a1b9a 100%); }
-    .group-io-component h4 { background: linear-gradient(135deg, #d32f2f 0%, #c62828 100%); }
-    .group-workflow h4 { background: linear-gradient(135deg, #388e3c 0%, #2e7d32 100%); }
-    .group-default h4 { background: linear-gradient(135deg, #616161 0%, #424242 100%); }
+    /* Component type colors - updated to match new palette */
+    .group-data-processor h4 { background: linear-gradient(135deg, var(--data-primary) 0%, #0056d6 100%); }
+    .group-context-processor h4 { background: linear-gradient(135deg, var(--context-primary) 0%, #8e44ad 100%); }
+    .group-io-component h4 { background: linear-gradient(135deg, var(--error-primary) 0%, #e74c3c 100%); }
+    .group-workflow h4 { background: linear-gradient(135deg, var(--success-primary) 0%, #27ae60 100%); }
+    .group-default h4 { background: linear-gradient(135deg, var(--neutral-primary) 0%, #2c3e50 100%); }
     
     .node-item {
       cursor: pointer;
@@ -130,8 +225,8 @@
     }
     
     .node-item.selected {
-      background: #e3f2fd;
-      border-left: 4px solid #1976d2;
+      background: var(--data-light);
+      border-left: 4px solid var(--data-primary);
       font-weight: 500;
     }
     
@@ -176,48 +271,48 @@
     
     /* Component type styling for tree nodes */
     .tree-node-item.data-processor {
-      border-color: #1976d2;
-      background: linear-gradient(135deg, #e3f2fd 0%, #f8fbff 100%);
+      border-color: var(--data-primary);
+      background: linear-gradient(135deg, var(--data-light) 0%, #f8fbff 100%);
     }
     .tree-node-item.data-processor:hover {
-      background: linear-gradient(135deg, #bbdefb 0%, #e3f2fd 100%);
-      border-color: #0d47a1;
+      background: linear-gradient(135deg, var(--data-border) 0%, var(--data-light) 100%);
+      border-color: #0056d6;
     }
     
     .tree-node-item.context-processor {
-      border-color: #7b1fa2;
-      background: linear-gradient(135deg, #f3e5f5 0%, #faf8fb 100%);
+      border-color: var(--context-primary);
+      background: linear-gradient(135deg, var(--context-light) 0%, #faf8fb 100%);
     }
     .tree-node-item.context-processor:hover {
-      background: linear-gradient(135deg, #e1bee7 0%, #f3e5f5 100%);
-      border-color: #4a148c;
+      background: linear-gradient(135deg, var(--context-border) 0%, var(--context-light) 100%);
+      border-color: #8e44ad;
     }
     
     .tree-node-item.io-component {
-      border-color: #d32f2f;
+      border-color: var(--error-primary);
       background: linear-gradient(135deg, #ffebee 0%, #fff8f8 100%);
     }
     .tree-node-item.io-component:hover {
       background: linear-gradient(135deg, #ffcdd2 0%, #ffebee 100%);
-      border-color: #b71c1c;
+      border-color: #e74c3c;
     }
     
     .tree-node-item.workflow {
-      border-color: #388e3c;
-      background: linear-gradient(135deg, #e8f5e8 0%, #f8fbf8 100%);
+      border-color: var(--success-primary);
+      background: linear-gradient(135deg, var(--input-light) 0%, #f8fbf8 100%);
     }
     .tree-node-item.workflow:hover {
-      background: linear-gradient(135deg, #c8e6c9 0%, #e8f5e8 100%);
-      border-color: #1b5e20;
+      background: linear-gradient(135deg, var(--input-border) 0%, var(--input-light) 100%);
+      border-color: #27ae60;
     }
     
     .tree-node-item.default {
-      border-color: #616161;
+      border-color: var(--neutral-primary);
       background: linear-gradient(135deg, #f5f5f5 0%, #fafafa 100%);
     }
     .tree-node-item.default:hover {
       background: linear-gradient(135deg, #eeeeee 0%, #f5f5f5 100%);
-      border-color: #424242;
+      border-color: #2c3e50;
     }
     
     /* Component type indicator */
@@ -233,19 +328,19 @@
       text-shadow: 0 1px 1px rgba(0,0,0,0.2);
     }
     
-    .data-processor .component-type-badge { background: #1976d2; }
-    .context-processor .component-type-badge { background: #7b1fa2; }
-    .io-component .component-type-badge { background: #d32f2f; }
-    .workflow .component-type-badge { background: #388e3c; }
-    .default .component-type-badge { background: #616161; }
+    .data-processor .component-type-badge { background: var(--data-primary); }
+    .context-processor .component-type-badge { background: var(--context-primary); }
+    .io-component .component-type-badge { background: var(--error-primary); }
+    .workflow .component-type-badge { background: var(--success-primary); }
+    .default .component-type-badge { background: var(--neutral-primary); }
     
     /* Details panel styling */
     #details h3 {
       margin: 0 0 15px 0;
-      color: #007acc;
+      color: var(--type-primary);
       font-size: 18px;
       font-weight: 600;
-      border-bottom: 2px solid #007acc;
+      border-bottom: 2px solid var(--type-primary);
       padding-bottom: 8px;
     }
     
@@ -256,14 +351,14 @@
     }
     
     #details b {
-      color: #333;
+      color: var(--neutral-primary);
       font-weight: 600;
     }
     
     #details pre {
       white-space: pre-wrap;
-      background: #f8f9fa;
-      border: 1px solid #e9ecef;
+      background: var(--neutral-light);
+      border: 1px solid var(--neutral-border);
       border-radius: 6px;
       padding: 15px;
       font-size: 12px;
@@ -276,13 +371,13 @@
     .details-section {
       margin: 15px 0;
       padding: 12px;
-      background: #f8f9fa;
+      background: var(--neutral-light);
       border-radius: 6px;
-      border-left: 4px solid #007acc;
+      border-left: 4px solid var(--type-primary);
     }
     
     .details-section b {
-      color: #007acc;
+      color: var(--type-primary);
     }
     
     .no-selection {

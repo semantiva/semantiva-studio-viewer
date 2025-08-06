@@ -1,5 +1,95 @@
     const {useState, useEffect, useRef, useCallback} = React;
 
+    // Resizable panel hook
+    function useResizable(initialWidth, minWidth = 200, maxWidth = 600) {
+      const [width, setWidth] = useState(initialWidth);
+      const [isResizing, setIsResizing] = useState(false);
+      const startX = useRef(0);
+      const startWidth = useRef(0);
+
+      const handleMouseDown = useCallback((e) => {
+        setIsResizing(true);
+        startX.current = e.clientX;
+        startWidth.current = width;
+        e.preventDefault();
+      }, [width]);
+
+      const handleMouseMove = useCallback((e) => {
+        if (!isResizing) return;
+        
+        const deltaX = e.clientX - startX.current;
+        const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth.current + deltaX));
+        setWidth(newWidth);
+      }, [isResizing, minWidth, maxWidth]);
+
+      const handleMouseUp = useCallback(() => {
+        setIsResizing(false);
+      }, []);
+
+      useEffect(() => {
+        if (isResizing) {
+          document.addEventListener('mousemove', handleMouseMove);
+          document.addEventListener('mouseup', handleMouseUp);
+          document.body.style.cursor = 'ew-resize';
+          document.body.style.userSelect = 'none';
+          
+          return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+          };
+        }
+      }, [isResizing, handleMouseMove, handleMouseUp]);
+
+      return { width, isResizing, handleMouseDown };
+    }
+
+    // Resizable panel hook for right panel (details)
+    function useResizableRight(initialWidth, minWidth = 200, maxWidth = 500) {
+      const [width, setWidth] = useState(initialWidth);
+      const [isResizing, setIsResizing] = useState(false);
+      const startX = useRef(0);
+      const startWidth = useRef(0);
+
+      const handleMouseDown = useCallback((e) => {
+        setIsResizing(true);
+        startX.current = e.clientX;
+        startWidth.current = width;
+        e.preventDefault();
+      }, [width]);
+
+      const handleMouseMove = useCallback((e) => {
+        if (!isResizing) return;
+        
+        const deltaX = startX.current - e.clientX; // Reversed for right panel
+        const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth.current + deltaX));
+        setWidth(newWidth);
+      }, [isResizing, minWidth, maxWidth]);
+
+      const handleMouseUp = useCallback(() => {
+        setIsResizing(false);
+      }, []);
+
+      useEffect(() => {
+        if (isResizing) {
+          document.addEventListener('mousemove', handleMouseMove);
+          document.addEventListener('mouseup', handleMouseUp);
+          document.body.style.cursor = 'ew-resize';
+          document.body.style.userSelect = 'none';
+          
+          return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+          };
+        }
+      }, [isResizing, handleMouseMove, handleMouseUp]);
+
+      return { width, isResizing, handleMouseDown };
+    }
+
     // Individual node component with anchor placeholders
     function PipelineNode({ node, pos, isSelected, onClick, registerAnchors, width, height }) {
       const nodeRef = useRef(null);
@@ -350,8 +440,8 @@
               left: channelGap,
               width: colWidths.config, 
               height: totalHeight - 100,
-              background: '#eeeeee',
-              border: '2px dashed #cccccc',
+              background: 'linear-gradient(135deg, #f2f2f7 0%, #e5e5ea 100%)',
+              border: '2px dashed #8e8e93',
               borderRadius: '12px',
               opacity: 0.6,
               zIndex: 0
@@ -367,8 +457,8 @@
               left: colWidths.config + 2 * channelGap, 
               width: colWidths.data,
               height: totalHeight - 100,
-              background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
-              border: '2px dashed #1976d2',
+              background: 'linear-gradient(135deg, #e8f4fd 0%, #c7e0f4 100%)',
+              border: '2px dashed #007aff',
               borderRadius: '12px',
               opacity: 0.6,
               zIndex: 0
@@ -384,8 +474,8 @@
               left: colWidths.config + colWidths.data + 3 * channelGap, 
               width: colWidths.context,
               height: totalHeight - 100,
-              background: 'linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%)',
-              border: '2px dashed #7b1fa2',
+              background: 'linear-gradient(135deg, #f5e6ff 0%, #e6ccff 100%)',
+              border: '2px dashed #af52de',
               borderRadius: '12px',
               opacity: 0.6,
               zIndex: 0
@@ -442,7 +532,7 @@
 
               // Use red styling for edges with data type incompatibility errors
               const hasError = edge.hasError || false;
-              const strokeColor = hasError ? "#dc3545" : "#000000";
+              const strokeColor = hasError ? "#ff3b30" : "#48484a";
               const markerUrl = hasError ? "url(#arrow-red)" : "url(#arrow-black)";
 
               return (
@@ -495,6 +585,10 @@
       const [loading, setLoading] = useState(true);
       const [selectedNodeId, setSelectedNodeId] = useState(null);
       const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+
+      // Resizable panels
+      const sidebar = useResizable(400, 200, 600);
+      const details = useResizableRight(300, 200, 500);
 
       useEffect(() => {
         console.log('Loading pipeline data...');
@@ -596,17 +690,24 @@
       return (
         <div style={{display:'flex', height:'100%', width:'100%'}}>
           <div id="sidebar" style={{ 
-            width: sidebarCollapsed ? '40px' : '400px', 
+            width: sidebarCollapsed ? '40px' : `${sidebar.width}px`, 
             overflow: 'hidden', 
-            transition: 'width 0.3s ease',
+            transition: sidebarCollapsed ? 'width 0.3s ease' : 'none',
             borderRight: '1px solid #ccc',
-            padding: sidebarCollapsed ? '4px 0' : '4px'
+            padding: sidebarCollapsed ? '4px 0' : '4px',
+            position: 'relative'
           }}>
+            {!sidebarCollapsed && (
+              <div 
+                className={`resize-handle resize-handle-right ${sidebar.isResizing ? 'resizing' : ''}`}
+                onMouseDown={sidebar.handleMouseDown}
+              />
+            )}
             <h3 
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               style={{
                 margin: '10px 5px', 
-                color: '#007acc',
+                color: '#5856d6',
                 cursor: 'pointer',
                 writingMode: sidebarCollapsed ? 'vertical-rl' : 'horizontal-tb',
                 textAlign: 'center',
@@ -625,10 +726,10 @@
               <h4 style={{ 
                 margin: '5px', 
                 padding: '5px 8px', 
-                background: '#e3f2fd', 
-                borderLeft: '4px solid #1976d2',
+                background: '#e8f4fd', 
+                borderLeft: '4px solid #007aff',
                 fontSize: '12px',
-                color: '#1976d2',
+                color: '#007aff',
                 fontWeight: 'bold'
               }}>
                 DATA PROCESSING
@@ -650,12 +751,12 @@
                   }} 
                   className={`node-item ${selectedNodeId === String(n.id) ? 'selected' : ''}`}
                   style={{
-                    backgroundColor: selectedNodeId === String(n.id) ? '#bbdefb' : '#f0f8ff',
-                    borderLeftColor: '#1976d2'
+                    backgroundColor: selectedNodeId === String(n.id) ? '#c7e0f4' : '#f8fbff',
+                    borderLeftColor: '#007aff'
                   }}
                 >
                   <div style={{ fontWeight: 'bold' }}>{n.label}</div>
-                  <div style={{ fontSize: '11px', color: '#1976d2' }}>{n.component_type}</div>
+                  <div style={{ fontSize: '11px', color: '#007aff' }}>{n.component_type}</div>
                 </div>
               ))}
             </div>
@@ -665,10 +766,10 @@
               <h4 style={{ 
                 margin: '5px', 
                 padding: '5px 8px', 
-                background: '#f3e5f5', 
-                borderLeft: '4px solid #7b1fa2',
+                background: '#f5e6ff', 
+                borderLeft: '4px solid #af52de',
                 fontSize: '12px',
-                color: '#7b1fa2',
+                color: '#af52de',
                 fontWeight: 'bold'
               }}>
                 CONTEXT PROCESSING
@@ -726,11 +827,11 @@
                   className={`node-item ${selectedNodeId === String(n.id) ? 'selected' : ''}`}
                   style={{
                     backgroundColor: selectedNodeId === String(n.id) ? '#ffcdd2' : '#fff8f8',
-                    borderLeftColor: '#d32f2f'
+                    borderLeftColor: '#ff3b30'
                   }}
                 >
                   <div style={{ fontWeight: 'bold' }}>{n.label}</div>
-                  <div style={{ fontSize: '11px', color: '#d32f2f' }}>{n.component_type}</div>
+                  <div style={{ fontSize: '11px', color: '#ff3b30' }}>{n.component_type}</div>
                 </div>
               ))}
             </div>
@@ -740,7 +841,7 @@
           <div id="graph">
             <div style={{ padding: '10px', borderBottom: '1px solid #ddd', background: '#f8f9fa' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <h3 style={{ margin: '0', color: '#007acc' }}>Semantiva Studio Lite - Dual-Channel Pipeline Inspection</h3>
+                <h3 style={{ margin: '0', color: '#5856d6' }}>Semantiva Studio Lite - Dual-Channel Pipeline Inspection</h3>
                 {pipelineInfo && pipelineInfo.has_errors && (
                   <span style={{ 
                     color: '#dc3545', 
@@ -771,48 +872,49 @@
               selectedNodeId={selectedNodeId}
             />
           </div>
-          <div id="details">
+          <div id="details" style={{ 
+            width: `${details.width}px`,
+            position: 'relative'
+          }}>
+            <div 
+              className={`resize-handle resize-handle-left ${details.isResizing ? 'resizing' : ''}`}
+              onMouseDown={details.handleMouseDown}
+            />
             {nodeInfo ? (
               <div>
-                <h3 style={{ color: '#007acc', borderBottom: '2px solid #007acc', paddingBottom: '5px' }}>
+                <h3 style={{ color: '#48484a', borderBottom: '2px solid #5856d6', paddingBottom: '5px' }}>
                   {nodeInfo.label}
                 </h3>
                 
                 {nodeInfo.docstring && (
                   <div style={{ 
                     marginBottom: '15px', 
-                    padding: '10px', 
-                    background: '#f0f8ff', 
-                    borderLeft: '4px solid #007acc',
-                    borderRadius: '4px',
+                    padding: '12px', 
+                    background: '#f8f9fa', 
+                    borderLeft: '4px solid #48484a',
+                    borderRadius: '6px',
                     fontStyle: 'italic',
                     fontSize: '14px',
-                    color: '#333'
+                    color: '#48484a'
                   }}>
                     {nodeInfo.docstring}
                   </div>
                 )}
                 
                 {nodeInfo.input_type && (
-                  <div style={{ marginBottom: '10px', padding: '8px', background: '#e8f5e8', borderRadius: '4px' }}>
-                    <strong>Input Type:</strong> {nodeInfo.input_type}
+                  <div style={{ marginBottom: '10px', padding: '8px', background: '#e8f5ea', borderRadius: '6px', borderLeft: '3px solid #34c759' }}>
+                    <strong style={{ color: '#34c759' }}>Input Type:</strong> {nodeInfo.input_type}
                   </div>
                 )}
                 
                 {nodeInfo.output_type && (
-                  <div style={{ marginBottom: '10px', padding: '8px', background: '#ffe8e8', borderRadius: '4px' }}>
-                    <strong>Output Type:</strong> {nodeInfo.output_type}
+                  <div style={{ marginBottom: '10px', padding: '8px', background: '#fff4e6', borderRadius: '6px', borderLeft: '3px solid #ff9500' }}>
+                    <strong style={{ color: '#ff9500' }}>Output Type:</strong> {nodeInfo.output_type}
                   </div>
                 )}
                 
-                <div style={{ marginBottom: '10px', padding: '8px', background: '#f8f9fa', borderRadius: '4px' }}>
-                  <strong>Type:</strong> {nodeInfo.component_type}
-                </div>
-                
-                <div style={{ marginBottom: '10px' }}>
-                  <p><b>Created Keys:</b> {nodeInfo.created_keys && nodeInfo.created_keys.length > 0 ? nodeInfo.created_keys.join(', ') : 'None'}</p>
-                  <p><b>Required Keys:</b> {nodeInfo.required_keys && nodeInfo.required_keys.length > 0 ? nodeInfo.required_keys.join(', ') : 'None'}</p>
-                  <p><b>Suppressed Keys:</b> {nodeInfo.suppressed_keys && nodeInfo.suppressed_keys.length > 0 ? nodeInfo.suppressed_keys.join(', ') : 'None'}</p>
+                <div style={{ marginBottom: '10px', padding: '8px', background: '#eeecff', borderRadius: '6px', borderLeft: '3px solid #5856d6' }}>
+                  <strong style={{ color: '#5856d6' }}>Type:</strong> {nodeInfo.component_type}
                 </div>
                 
                 <div>
@@ -823,13 +925,13 @@
                     <div>
                       {/* Parameters from pipeline configuration */}
                       <div style={{marginTop: '10px'}}>
-                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#1976d2'}}>From Pipeline Configuration:</p>
+                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#8e8e93'}}>From Pipeline Configuration:</p>
                         {Object.keys(nodeInfo.parameter_resolution.from_pipeline_config || {}).length > 0 ? (
                           <div style={{
-                            background: '#e3f2fd', 
+                            background: '#f2f2f7', 
                             padding: '8px', 
                             borderRadius: '4px',
-                            border: '1px solid #bbdefb',
+                            border: '1px solid #d1d1d6',
                             fontSize: '12px'
                           }}>
                             {Object.entries(nodeInfo.parameter_resolution.from_pipeline_config).map(([key, details]) => (
@@ -855,13 +957,13 @@
                       
                       {/* Parameters from processor defaults */}
                       <div style={{marginTop: '10px'}}>
-                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#ff9800'}}>From Processor Defaults:</p>
+                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#ff9f0a'}}>From Processor Defaults:</p>
                         {Object.keys(nodeInfo.parameter_resolution.from_processor_defaults || {}).length > 0 ? (
                           <div style={{
-                            background: '#fff3e0', 
+                            background: '#fff4e6', 
                             padding: '8px', 
                             borderRadius: '4px',
-                            border: '1px solid #ffcc02',
+                            border: '1px solid #ffe0b3',
                             fontSize: '12px'
                           }}>
                             {Object.entries(nodeInfo.parameter_resolution.from_processor_defaults).map(([key, details]) => (
@@ -887,13 +989,13 @@
                       
                       {/* Parameters from context */}
                       <div style={{marginTop: '10px'}}>
-                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#7b1fa2'}}>From Context:</p>
+                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#af52de'}}>From Context:</p>
                         {Object.keys(nodeInfo.parameter_resolution.from_context || {}).length > 0 ? (
                           <div style={{
-                            background: '#f3e5f5', 
+                            background: '#f5e6ff', 
                             padding: '8px', 
                             borderRadius: '4px',
-                            border: '1px solid #e1bee7',
+                            border: '1px solid #e6ccff',
                             fontSize: '12px'
                           }}>
                             {Object.entries(nodeInfo.parameter_resolution.from_context).map(([key, details]) => (
@@ -901,9 +1003,9 @@
                                 <span style={{fontWeight: 'bold'}}>{key}:</span> {
                                   typeof details === 'object' && details.source !== undefined ? (
                                     details.source !== "Initial Context" ? (
-                                      <span>From <span style={{color: '#7b1fa2', fontWeight: 'bold'}}>Node {details.source_idx}</span></span>
+                                      <span>From <span style={{color: '#af52de', fontWeight: 'bold'}}>Node {details.source_idx}</span></span>
                                     ) : (
-                                      <span>From <span style={{color: '#d32f2f', fontWeight: 'bold'}}>Initial Context</span></span>
+                                      <span>From <span style={{color: '#ff3b30', fontWeight: 'bold'}}>Initial Context</span></span>
                                     )
                                   ) : (
                                     details
@@ -934,6 +1036,12 @@
                       This node does not require any parameters.
                     </div>
                   )}
+                </div>
+                
+                <div style={{ marginBottom: '10px' }}>
+                  <p><b>Created Keys:</b> {nodeInfo.created_keys && nodeInfo.created_keys.length > 0 ? nodeInfo.created_keys.join(', ') : 'None'}</p>
+                  <p><b>Required Keys:</b> {nodeInfo.required_keys && nodeInfo.required_keys.length > 0 ? nodeInfo.required_keys.join(', ') : 'None'}</p>
+                  <p><b>Suppressed Keys:</b> {nodeInfo.suppressed_keys && nodeInfo.suppressed_keys.length > 0 ? nodeInfo.suppressed_keys.join(', ') : 'None'}</p>
                 </div>
                 
                 {/* Errors Section */}
