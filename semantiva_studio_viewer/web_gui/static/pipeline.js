@@ -1,5 +1,88 @@
     const {useState, useEffect, useRef, useCallback} = React;
 
+    // Constants and Configuration
+    const LAYOUT_CONFIG = {
+      channelGap: 10,
+      nodeWidth: 300,
+      verticalSpacing: 20,
+      baseContentHeight: 80,
+      calloutHeight: 24,
+      calloutSpacing: 4,
+      minCalloutWidth: 60,
+      textWidthEstimate: 7, // pixels per character
+      nameTextEstimate: 9, // pixels per character for node names
+    };
+
+    const COLORS = {
+      configChannel: {
+        background: 'linear-gradient(135deg, #f2f2f7 0%, #e5e5ea 100%)',
+        border: '#8e8e93',
+        text: '#48484a'
+      },
+      dataChannel: {
+        background: 'linear-gradient(135deg, #e8f4fd 0%, #c7e0f4 100%)',
+        border: '#007aff',
+        text: '#007aff'
+      },
+      contextChannel: {
+        background: 'linear-gradient(135deg, #f5e6ff 0%, #e6ccff 100%)',
+        border: '#af52de',
+        text: '#7b1fa2'
+      },
+      error: '#ff3b30',
+      success: '#34c759',
+      warning: '#ff9f0a'
+    };
+
+    // Utility Functions
+    function calculateCalloutWidth(text) {
+      const textWidth = text.length * LAYOUT_CONFIG.textWidthEstimate;
+      return Math.max(LAYOUT_CONFIG.minCalloutWidth, textWidth + 16);
+    }
+
+    function createCalloutStyle(type, text) {
+      const width = calculateCalloutWidth(text);
+      const baseStyle = {
+        borderRadius: '4px',
+        padding: '4px 8px',
+        fontSize: '11px',
+        whiteSpace: 'nowrap',
+        height: `${LAYOUT_CONFIG.calloutHeight}px`,
+        width: `${width}px`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxSizing: 'border-box',
+        fontWeight: '500',
+        textAlign: 'center'
+      };
+
+      const typeStyles = {
+        config: {
+          background: '#f2f2f7',
+          border: '1px solid #8e8e93',
+          color: '#48484a'
+        },
+        default: {
+          background: '#fff4e6',
+          border: '1px solid #ff9f0a',
+          color: '#d68910'
+        },
+        context: {
+          background: '#f5e6ff',
+          border: '1px solid #af52de',
+          color: '#7b1fa2'
+        },
+        created: {
+          background: '#e8f5ea',
+          border: '1px solid #34c759',
+          color: '#1d8348'
+        }
+      };
+
+      return { ...baseStyle, ...typeStyles[type] };
+    }
+
     // Resizable panel hook
     function useResizable(initialWidth, minWidth = 200, maxWidth = 600) {
       const [width, setWidth] = useState(initialWidth);
@@ -114,14 +197,27 @@
         registerAnchors(node.id, anchors);
       }, [node.id, node.data.contextParams.length, registerAnchors]);
 
-      const paramCount = ((node.data.pipelineConfigParams ? node.data.pipelineConfigParams.length : 0) || 0) + 
-                         ((node.data.defaultParams ? node.data.defaultParams.length : 0) || 0);
-      const nodeWidthToUse = pos.type === 'source-sink' ? 450 : width;
-
-      const labelParts = node.data.label.split('\n');
-      const nodeName = labelParts[0];
-      const typeInfo = labelParts.slice(1).join(' ');
+      const leftParamCount = ((node.data.pipelineConfigParams ? node.data.pipelineConfigParams.length : 0) || 0) + 
+                             ((node.data.defaultParams ? node.data.defaultParams.length : 0) || 0);
+      const rightParamCount = (node.data.contextParams ? node.data.contextParams.length : 0) + 
+                              (node.data.createdKeys ? node.data.createdKeys.length : 0);
+      
+      const nodeName = node.data.label;
+      const inputType = node.data.inputType;
+      const outputType = node.data.outputType;
       const hasErrors = node.data.hasErrors || false;
+      
+      // Calculate minimum width needed for the component name
+      const nameLength = nodeName.length;
+      const estimatedTextWidth = nameLength * LAYOUT_CONFIG.nameTextEstimate;
+      const minWidthForText = Math.max(width, estimatedTextWidth + 40);
+      const nodeWidthToUse = pos.type === 'source-sink' ? Math.max(450, minWidthForText) : minWidthForText;
+
+      // Calculate dynamic height based on content and callouts
+      const maxCallouts = Math.max(leftParamCount, rightParamCount);
+      const calloutsHeight = maxCallouts > 0 ? 
+        (maxCallouts * LAYOUT_CONFIG.calloutHeight) + ((maxCallouts - 1) * LAYOUT_CONFIG.calloutSpacing) : 0;
+      const dynamicHeight = Math.max(LAYOUT_CONFIG.baseContentHeight, calloutsHeight + 30);
 
       return (
         <div
@@ -132,34 +228,73 @@
             left: pos.x - nodeWidthToUse / 2,
             top: pos.y,
             width: nodeWidthToUse,
-            height: height
+            height: dynamicHeight,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            padding: '8px',
+            boxSizing: 'border-box'
           }}
           onClick={() => onClick(null, node)}
         >
-          <div
-            style={{
-              fontWeight: 'bold',
-              marginBottom: '8px',
-              fontSize: '14px',
-              color: '#333',
-              wordWrap: 'break-word'
-            }}
-          >
-            {nodeName}
-          </div>
+          {/* Input data type at top */}
           <div
             style={{
               fontSize: '11px',
               color: '#666',
-              wordWrap: 'break-word'
+              textAlign: 'center',
+              wordWrap: 'break-word',
+              overflowWrap: 'break-word',
+              lineHeight: '1.2',
+              minHeight: inputType ? 'auto' : '0px',
+              padding: '0 4px'
             }}
           >
-            {typeInfo}
+            {inputType ? `→ ${inputType}` : ''}
           </div>
+          
+          {/* Operation name in the center - will be automatically centered by flex */}
+          <div
+            style={{
+              fontWeight: 'bold',
+              fontSize: '14px',
+              color: '#333',
+              textAlign: 'center',
+              wordWrap: 'break-word',
+              overflowWrap: 'break-word',
+              hyphens: 'auto',
+              lineHeight: '1.2',
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '0 4px' // Add some padding to prevent text from touching edges
+            }}
+          >
+            {nodeName}
+          </div>
+          
+          {/* Output data type at bottom */}
+          <div
+            style={{
+              fontSize: '11px',
+              color: '#666',
+              textAlign: 'center',
+              wordWrap: 'break-word',
+              overflowWrap: 'break-word',
+              lineHeight: '1.2',
+              minHeight: outputType ? 'auto' : '0px',
+              padding: '0 4px'
+            }}
+          >
+            {outputType ? `${outputType} →` : ''}
+          </div>
+
+          {/* Node ID - positioned absolutely */}
           <div
             style={{
               position: 'absolute',
-              top: '5px',
+              top: '2px',
               right: '8px',
               fontSize: '10px',
               color: '#999',
@@ -167,28 +302,6 @@
             }}
           >
             #{node.id}
-          </div>
-          {/* Channel indicator */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '5px',
-              left: '8px',
-              fontSize: '10px',
-              fontWeight: 'bold',
-              color:
-                pos.type === 'data-processor'
-                  ? '#1976d2'
-                  : pos.type === 'context-processor'
-                  ? '#7b1fa2'
-                  : '#d32f2f'
-            }}
-          >
-            {pos.type === 'data-processor'
-              ? 'DATA'
-              : pos.type === 'context-processor'
-              ? 'CTX'
-              : 'I/O'}
           </div>
 
           {/* Anchor elements - positioned at edge centers */}
@@ -216,7 +329,7 @@
               height: '1px'
             }}
           />
-          {[...Array(paramCount)].map((_, i) => (
+          {[...Array(leftParamCount)].map((_, i) => (
             <div
               key={`l-${i}`}
               ref={el => (leftParamRefs.current[i] = el)}
@@ -224,12 +337,27 @@
             />
           ))}
           <div ref={execRightRef} className="anchor right" />
-          <div className="context-params">
+          
+          {/* Context params and created keys - positioned on the right */}
+          <div 
+            className="context-params"
+            style={{
+              position: 'absolute',
+              left: '100%',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              marginLeft: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: `${LAYOUT_CONFIG.calloutSpacing}px`
+            }}
+          >
             {node.data.contextParams.map((param, i) => (
               <div
                 key={param}
                 ref={el => (paramRightRefs.current[i] = el)}
                 className="param-label right-anchor"
+                style={createCalloutStyle('context', param)}
               >
                 {param}
               </div>
@@ -238,16 +366,33 @@
               <div
                 key={key}
                 className="param-label created-key"
+                style={createCalloutStyle('created', key)}
               >
                 {key}
               </div>
             ))}
           </div>
-          <div className="config-params">
+          
+          {/* Config params - positioned on the left */}
+          <div 
+            className="config-params"
+            style={{
+              position: 'absolute',
+              right: '100%',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              marginRight: '8px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: `${LAYOUT_CONFIG.calloutSpacing}px`,
+              alignItems: 'flex-end'
+            }}
+          >
             {(node.data.pipelineConfigParams || []).map((param, i) => (
               <div
                 key={param}
                 className="param-label left-anchor"
+                style={createCalloutStyle('config', param)}
               >
                 {param}
               </div>
@@ -256,6 +401,7 @@
               <div
                 key={param}
                 className="param-label left-anchor-default"
+                style={createCalloutStyle('default', param)}
               >
                 {param}
               </div>
@@ -271,11 +417,18 @@
       const [containerRef, setContainerRef] = useState(null);
       const [anchorMap, setAnchorMap] = useState({});
       const [colWidths, setColWidths] = useState({ data: 300, config: 80, context: 300 });
-      // gap between Config and Data channels
-      const channelGap = 10;
-      const nodeWidth = 300;
-      const nodeHeight = 50;
-      const verticalSpacing = 80;
+
+      // Calculate dynamic height for each node
+      const calculateNodeHeight = (node) => {
+        const leftParamCount = ((node.data.pipelineConfigParams ? node.data.pipelineConfigParams.length : 0) || 0) + 
+                               ((node.data.defaultParams ? node.data.defaultParams.length : 0) || 0);
+        const rightParamCount = (node.data.contextParams ? node.data.contextParams.length : 0) + 
+                                (node.data.createdKeys ? node.data.createdKeys.length : 0);
+        const maxCallouts = Math.max(leftParamCount, rightParamCount);
+        const calloutsHeight = maxCallouts > 0 ? 
+          (maxCallouts * LAYOUT_CONFIG.calloutHeight) + ((maxCallouts - 1) * LAYOUT_CONFIG.calloutSpacing) : 0;
+        return Math.max(LAYOUT_CONFIG.baseContentHeight, calloutsHeight + 30);
+      };
 
       const registerAnchors = useCallback((id, rects) => {
         if (!containerRef) {
@@ -350,27 +503,27 @@
           const allParams = [...configParams, ...defaultParams];
           return allParams.length ? Math.max(...allParams.map(p => p.length)) : 80;
         });
-        const maxData = Math.max(nodeWidth, ...dataWidths);
-        const maxCtx = Math.max(nodeWidth, ...ctxWidths, 0);
+        const maxData = Math.max(LAYOUT_CONFIG.nodeWidth, ...dataWidths);
+        const maxCtx = Math.max(LAYOUT_CONFIG.nodeWidth, ...ctxWidths, 0);
         const configMax = Math.max(...configWidths, 80);
         setColWidths({
-          data: maxData + 2 * channelGap,
-          config: configMax + channelGap,
-          context: maxCtx + 2 * channelGap
+          data: maxData + 2 * LAYOUT_CONFIG.channelGap,
+          config: configMax + LAYOUT_CONFIG.channelGap,
+          context: maxCtx + 2 * LAYOUT_CONFIG.channelGap
         });
       }, [nodes, anchorMap]);
 
       // Compute channel centers based on measured column widths
       const totalWidth =
-        colWidths.config + colWidths.data + colWidths.context + channelGap * 4;
+        colWidths.config + colWidths.data + colWidths.context + LAYOUT_CONFIG.channelGap * 4;
       const leftChannelCenter =
-        channelGap + colWidths.config + channelGap + colWidths.data / 2;
+        LAYOUT_CONFIG.channelGap + colWidths.config + LAYOUT_CONFIG.channelGap + colWidths.data / 2;
       const rightChannelCenter =
-        channelGap +
+        LAYOUT_CONFIG.channelGap +
         colWidths.config +
-        channelGap +
+        LAYOUT_CONFIG.channelGap +
         colWidths.data +
-        channelGap +
+        LAYOUT_CONFIG.channelGap +
         colWidths.context / 2;
       const centerPosition = (leftChannelCenter + rightChannelCenter) / 2;
       
@@ -395,13 +548,16 @@
           xPos = leftChannelCenter;
         }
         
+        const nodeHeight = calculateNodeHeight(node);
+        
         nodePositions[node.id] = {
           x: xPos,
           y: currentY,
-          type: nodeType
+          type: nodeType,
+          height: nodeHeight
         };
         
-        currentY += nodeHeight + verticalSpacing;
+        currentY += nodeHeight + LAYOUT_CONFIG.verticalSpacing;
       });
       
       const totalHeight = currentY + 80;
@@ -427,9 +583,9 @@
               transform: `scale(${zoomLevel})`,
               transformOrigin: '0 0',
               gridTemplateColumns: `${colWidths.config}px ${colWidths.data}px ${colWidths.context}px`,
-              columnGap: `${channelGap}px`,
-              paddingLeft: channelGap,
-              paddingRight: channelGap
+              columnGap: `${LAYOUT_CONFIG.channelGap}px`,
+              paddingLeft: LAYOUT_CONFIG.channelGap,
+              paddingRight: LAYOUT_CONFIG.channelGap
             }}>
           {/* Channel backgrounds - rendered within transform scope */}
           <div 
@@ -437,11 +593,11 @@
             style={{ 
               position: 'absolute',
               top: 10,
-              left: channelGap,
+              left: LAYOUT_CONFIG.channelGap,
               width: colWidths.config, 
               height: totalHeight - 100,
-              background: 'linear-gradient(135deg, #f2f2f7 0%, #e5e5ea 100%)',
-              border: '2px dashed #8e8e93',
+              background: COLORS.configChannel.background,
+              border: `2px dashed ${COLORS.configChannel.border}`,
               borderRadius: '12px',
               opacity: 0.6,
               zIndex: 0
@@ -454,11 +610,11 @@
             style={{ 
               position: 'absolute',
               top: 10,
-              left: colWidths.config + 2 * channelGap, 
+              left: colWidths.config + 2 * LAYOUT_CONFIG.channelGap, 
               width: colWidths.data,
               height: totalHeight - 100,
-              background: 'linear-gradient(135deg, #e8f4fd 0%, #c7e0f4 100%)',
-              border: '2px dashed #007aff',
+              background: COLORS.dataChannel.background,
+              border: `2px dashed ${COLORS.dataChannel.border}`,
               borderRadius: '12px',
               opacity: 0.6,
               zIndex: 0
@@ -471,11 +627,11 @@
             style={{ 
               position: 'absolute',
               top: 10,
-              left: colWidths.config + colWidths.data + 3 * channelGap, 
+              left: colWidths.config + colWidths.data + 3 * LAYOUT_CONFIG.channelGap, 
               width: colWidths.context,
               height: totalHeight - 100,
-              background: 'linear-gradient(135deg, #f5e6ff 0%, #e6ccff 100%)',
-              border: '2px dashed #af52de',
+              background: COLORS.contextChannel.background,
+              border: `2px dashed ${COLORS.contextChannel.border}`,
               borderRadius: '12px',
               opacity: 0.6,
               zIndex: 0
@@ -519,12 +675,12 @@
               if (!sourcePos || !targetPos) return null;
 
               // Calculate connection points directly from node positions
-              const sourceNodeWidth = sourcePos.type === 'source-sink' ? 450 : nodeWidth;
-              const targetNodeWidth = targetPos.type === 'source-sink' ? 450 : nodeWidth;
+              const sourceNodeWidth = sourcePos.type === 'source-sink' ? 450 : LAYOUT_CONFIG.nodeWidth;
+              const targetNodeWidth = targetPos.type === 'source-sink' ? 450 : LAYOUT_CONFIG.nodeWidth;
               
               // Start from bottom center of source node
               const startX = sourcePos.x;
-              const startY = sourcePos.y + nodeHeight;
+              const startY = sourcePos.y + sourcePos.height;
               
               // End at top center of target node  
               const endX = targetPos.x;
@@ -532,7 +688,7 @@
 
               // Use red styling for edges with data type incompatibility errors
               const hasError = edge.hasError || false;
-              const strokeColor = hasError ? "#ff3b30" : "#48484a";
+              const strokeColor = hasError ? COLORS.error : "#48484a";
               const markerUrl = hasError ? "url(#arrow-red)" : "url(#arrow-black)";
 
               return (
@@ -564,8 +720,8 @@
                 isSelected={isSelected}
                 onClick={onNodeClick}
                 registerAnchors={registerAnchors}
-                width={nodeWidth}
-                height={nodeHeight}
+                width={LAYOUT_CONFIG.nodeWidth}
+                height={pos.height}
               />
             );
           })}
@@ -625,7 +781,9 @@
               return {
                 id: String(node.id),
                 data: {
-                  label: node.label + "\n" + (node.input_type || '') + (node.output_type ? ' → ' + node.output_type : ''),
+                  label: node.label,
+                  inputType: node.input_type || '',
+                  outputType: node.output_type || '',
                   pipelineConfigParams: configParams,
                   defaultParams: defaultParams,
                   contextParams: node.contextParams || [],
