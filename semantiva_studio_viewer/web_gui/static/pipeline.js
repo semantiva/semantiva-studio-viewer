@@ -184,15 +184,14 @@
 
       useEffect(() => {
         if (!nodeRef.current) return;
-        const rect = nodeRef.current.getBoundingClientRect();
-        const grab = r => r && r.getBoundingClientRect();
-        const execAnchorRect = execRightRef.current && execRightRef.current.getBoundingClientRect();
+        // Provide DOM elements to the registration function so the CoordinateSystem
+        // helper can measure them consistently in container-local coordinates.
         const anchors = {
-          top: topRefs.current.map(grab).filter(Boolean),
-          bottom: bottomRefs.current.map(grab).filter(Boolean),
-          left: leftParamRefs.current.map(grab).filter(Boolean),
-          right: [execAnchorRect, ...paramRightRefs.current.map(grab).filter(Boolean)].filter(Boolean),
-          node: rect
+          top: topRefs.current.filter(Boolean),
+          bottom: bottomRefs.current.filter(Boolean),
+          left: leftParamRefs.current.filter(Boolean),
+          right: [execRightRef.current, ...paramRightRefs.current.filter(Boolean)].filter(Boolean),
+          node: nodeRef.current
         };
         registerAnchors(node.id, anchors);
       }, [node.id, node.data.contextParams.length, registerAnchors]);
@@ -413,8 +412,10 @@
 
     // Custom Graph Component with dual-channel layout
     function CustomGraph({ nodes, edges, onNodeClick, selectedNodeId }) {
-      const [zoomLevel, setZoomLevel] = useState(1);
-      const [containerRef, setContainerRef] = useState(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [containerRef, setContainerRef] = useState(null);
+  // CoordinateSystem helper instance
+  const csRef = React.useRef(null);
       const [anchorMap, setAnchorMap] = useState({});
       const [colWidths, setColWidths] = useState({ data: 300, config: 80, context: 300 });
 
@@ -436,38 +437,44 @@
           setTimeout(() => registerAnchors(id, rects), 10);
           return;
         }
-        const containerRect = containerRef.getBoundingClientRect();
-        
-        // For top/bottom anchors, we want the center horizontally and the edge vertically
-        const convertTopBottom = r => ({
-          x: r.left + r.width / 2 - containerRect.left,
-          y: r.top + r.height / 2 - containerRect.top
-        });
-        
-        // For left/right anchors, use center point
-        const convert = r => ({
-          x: r.left + r.width / 2 - containerRect.left,
-          y: r.top + r.height / 2 - containerRect.top
-        });
-        
-        const convertNode = r => ({
-          x: r.left - containerRect.left,
-          y: r.top - containerRect.top,
-          width: r.width,
-          height: r.height
-        });
-        
-        const convArr = arr => arr.map(convert);
-        const convTopBottomArr = arr => arr.map(convertTopBottom);
-        
+
+        // If CoordinateSystem is available, use it to compute container-local coords
+        const cs = csRef.current;
+
+        const makeAnchorFromElement = (el) => {
+          if (!el) return null;
+          if (cs && cs.elementToContainer) {
+            const r = cs.elementToContainer(el);
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2, width: r.width, height: r.height };
+          }
+          // Fallback: measure via getBoundingClientRect
+          const crect = containerRef.getBoundingClientRect();
+          const rect = el.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2 - crect.left, y: rect.top + rect.height / 2 - crect.top, width: rect.width, height: rect.height };
+        };
+
+        const makeNodeFromElement = (el) => {
+          if (!el) return null;
+          if (cs && cs.elementToContainer) {
+            const r = cs.elementToContainer(el);
+            return { x: r.x, y: r.y, width: r.width, height: r.height };
+          }
+          const crect = containerRef.getBoundingClientRect();
+          const rect = el.getBoundingClientRect();
+          return { x: rect.left - crect.left, y: rect.top - crect.top, width: rect.width, height: rect.height };
+        };
+
+        const convArrFromEls = arr => (arr || []).map(makeAnchorFromElement).filter(Boolean);
+        const convTopBottomArrFromEls = arr => (arr || []).map(makeAnchorFromElement).filter(Boolean);
+
         setAnchorMap(prev => ({
           ...prev,
           [id]: {
-            top: convTopBottomArr(rects.top),
-            bottom: convTopBottomArr(rects.bottom),
-            left: convArr(rects.left),
-            right: convArr(rects.right),
-            node: convertNode(rects.node)
+            top: convTopBottomArrFromEls(rects.top),
+            bottom: convTopBottomArrFromEls(rects.bottom),
+            left: convArrFromEls(rects.left),
+            right: convArrFromEls(rects.right),
+            node: makeNodeFromElement(rects.node)
           }
         }));
       }, [containerRef]);
@@ -483,6 +490,20 @@
       const handleResetZoom = () => {
         setZoomLevel(1);
       };
+
+      // When containerRef becomes available, initialize or set the container on csRef
+      React.useEffect(() => {
+        if (!containerRef) return;
+        if (!csRef.current && typeof window !== 'undefined' && window.CoordinateSystem) {
+          csRef.current = new window.CoordinateSystem();
+        }
+        if (csRef.current) csRef.current.setContainer(containerRef);
+      }, [containerRef]);
+
+      // When zoom changes, let CoordinateSystem know (so logical<->container conversions work)
+      React.useEffect(() => {
+        if (csRef.current && csRef.current.setScale) csRef.current.setScale(zoomLevel);
+      }, [zoomLevel]);
 
 
 
