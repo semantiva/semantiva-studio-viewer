@@ -1,125 +1,104 @@
 # Semantiva Studio Viewer
 
-A lightweight web-based viewer for Semantiva pipelines and components with interactive visualization capabilities.
+Web-based viewers and exporters for **Semantiva** pipelines and component hierarchies.
 
-## Overview
-
-**Semantiva Studio Viewer** provides an intuitive web interface for exploring, analyzing, and visualizing Semantiva pipelines and component hierarchies. It offers both interactive web servers and standalone HTML export capabilities, making it perfect for development, debugging, documentation, and sharing pipeline configurations.
-
-## Key Features
-
-### Pipeline Visualization
-- **Dual-Channel Layout**: Separates data processing and context processing operations for clarity
-- **Interactive Node Inspection**: Click on any node to view detailed information about processors, parameters, and data types
-- **Parameter Flow Tracking**: Visual representation of how parameters flow from configuration and context
-- **Error Highlighting**: Invalid configurations and data type mismatches are clearly highlighted
-- **Responsive Design**: Works on desktop and mobile devices
-
-### Component Hierarchy Browser
-- **Ontology Visualization**: Interactive tree view of the complete Semantiva component hierarchy
-- **Type-Based Organization**: Components grouped by type (Data Processors, Context Processors, I/O Components, etc.)
-- **Detailed Documentation**: Access docstrings, input/output types, and parameter information
-- **Search and Filter**: Find components quickly with filtering capabilities
-
-### Export Capabilities
-- **Standalone HTML**: Generate self-contained HTML files for sharing and documentation
-- **GitHub Pages Ready**: Export files work perfectly with static hosting services
-- **Offline Viewing**: No server required for exported visualizations
-
-## Installation
+## Install
 
 ```bash
 pip install semantiva-studio-viewer
-```
+````
 
-Or with PDM:
+This provides the `semantiva-studio-viewer` CLI.
+
+---
+
+## CLI overview
+
 ```bash
-pdm add semantiva-studio-viewer
+semantiva-studio-viewer --help
 ```
 
-## Quick Start
+Main commands:
 
-### Pipeline Visualization
+* **Pipeline inspection**
 
-1. **Start Interactive Server**:
-   ```bash
-   semantiva-studio-viewer serve-pipeline path/to/pipeline.yaml --port 8000
-   ```
-   Then open `http://127.0.0.1:8000` to explore your pipeline interactively.
+  * `serve-pipeline <pipeline.yaml> [--trace-jsonl <trace.jsonl>] [--host 127.0.0.1] [--port 8000]`
+  * `export-pipeline <pipeline.yaml> <output.html> [--trace-jsonl <trace.jsonl>]`
+* **Component inspection**
 
-2. **Export Standalone HTML**:
-   ```bash
-   semantiva-studio-viewer export-pipeline path/to/pipeline.yaml output.html
-   ```
+  * `serve-components <ontology.ttl> [--host 127.0.0.1] [--port 8000]`
+  * `export-components <ontology.ttl> <output.html>`
 
-### Component Hierarchy Browser
+---
 
-1. **Start Interactive Server**:
-   ```bash
-   semantiva-studio-viewer serve-components semantiva_components.ttl --port 8001
-   ```
+## Pipeline inspector
 
-2. **Export Standalone HTML**:
-   ```bash
-   semantiva-studio-viewer export-components semantiva_components.ttl components.html
-   ```
+Interactive view of a pipeline:
 
-## Use Cases
+```bash
+semantiva-studio-viewer serve-pipeline semantiva-imaging-pipeline.yaml --port 8000
+```
 
-### Development & Debugging
-- **Pipeline Development**: Visualize pipeline structure during development to ensure correct flow
-- **Error Diagnosis**: Quickly identify configuration errors, missing parameters, or data type mismatches
-- **Parameter Tracking**: Understand how context flows through your pipeline
+Features:
 
-### Documentation & Sharing
-- **Team Collaboration**: Share pipeline visualizations with team members for review
-- **Documentation**: Include exported HTML files in documentation or presentations
-- **Educational**: Teach Semantiva concepts with visual pipeline examples
+* Dual-channel layout (data + context).
+* Node details: parameters, types, provenance.
+* Validation hints from Semantiva’s inspection system.
 
-### Analysis & Optimization
-- **Architecture Review**: Review pipeline architecture and node relationships
-- **Validation**: Ensure pipelines conform to expected patterns and constraints
+---
 
-## Interface Overview
+### Adding execution traces
 
-### Pipeline Viewer
-- **Left Panel**: Categorized list of pipeline nodes (Data Processing, Context Processing, I/O)
-- **Center Panel**: Interactive dual-channel graph visualization
-- **Right Panel**: Detailed node information including parameters, types, and documentation
+Overlay a JSONL trace (from a previous run):
 
-### Component Browser  
-- **Left Panel**: Component groups with filtering options
-- **Center Panel**: Interactive hierarchy tree
-- **Right Panel**: Component details with full documentation
+```bash
+semantiva-studio-viewer serve-pipeline semantiva-imaging-pipeline.yaml \
+  --trace-jsonl traces/20250823_run.jsonl
+```
 
-## Advanced Features
+Trace overlay adds:
 
-### Configuration Error Handling
-The viewer can visualize even invalid pipeline configurations, helping you identify and fix issues:
-- Missing required parameters
-- Data type incompatibilities
-- Invalid component references
-- Context flow problems
+* Per-node execution summaries (phases, timings, counts).
+* Deterministic node↔UUID binding (via **positional identity** in canonical spec).
+* Per-node event APIs: `/api/trace/node/<uuid>?offset=&limit=`
+* Trace metadata at `/api/trace/meta` and aggregated stats at `/api/trace/summary`.
 
-### Parameter Resolution Display
-Understand exactly how each node gets its parameters:
-- **Pipeline Configuration**: Parameters directly specified in YAML
-- **Context Values**: Parameters sourced from previous nodes' context output
-- **Default Values**: When components use built-in defaults
+You can also **export HTML with traces pre-baked**:
 
-### Export Options
-- **Self-Contained**: All CSS, JavaScript, and data embedded in a single HTML file
-- **CDN-Free**: No external dependencies for exported files
-- **Cross-Platform**: Works in any modern web browser
+```bash
+semantiva-studio-viewer export-pipeline semantiva-imaging-pipeline.yaml \
+  pipeline_with_trace.html --trace-jsonl traces/run.jsonl
+```
 
-## Integration with Semantiva
+---
 
-This viewer integrates seamlessly with the Semantiva framework:
-- Uses the same configuration files and component definitions
-- Leverages Semantiva's inspection system for accurate analysis
-- Supports all Semantiva data types and component types
-- Compatible with custom components and extensions
+## Components browser
+
+Explore Semantiva component ontologies:
+
+```bash
+semantiva-studio-viewer serve-components semantiva_components.ttl --port 8001
+```
+
+* Classes as nodes
+* Subclass edges
+* Metadata from docstrings, I/O types, parameters
+
+Export standalone HTML:
+
+```bash
+semantiva-studio-viewer export-components semantiva_components.ttl components.html
+```
+
+---
+
+## Notes
+
+* The inspector tolerates partially invalid configs to aid debugging.
+* When traces are present, **node→UUID mapping is positional** (from `canonical_spec`); label/FQN fallbacks are used only if necessary.
+
+---
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See LICENSE file for details.
+Apache License, Version 2.0. See [LICENSE](LICENSE).

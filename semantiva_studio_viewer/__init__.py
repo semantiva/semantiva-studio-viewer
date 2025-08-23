@@ -14,8 +14,8 @@
 
 """Semantiva Studio Viewer - Web-based visualization for Semantiva pipelines and components.
 
-This package provides interactive web interfaces for exploring Semantiva pipelines and 
-component hierarchies. It includes both server-based interactive viewers and standalone 
+This package provides interactive web interfaces for exploring Semantiva pipelines and
+component hierarchies. It includes both server-based interactive viewers and standalone
 HTML export capabilities.
 """
 

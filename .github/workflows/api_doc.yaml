@@ -1,0 +1,50 @@
+name: Deploy Sphinx Docs
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+env:
+  project_name: semantiva-studio-viewer
+  python_version: '3.10.12'
+
+jobs:
+  build-and-deploy:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.python_version }}
+
+      - name: Install project and docs dependencies
+        run: |
+          pip install -e .
+          pip install sphinx sphinx-autobuild sphinx-autodoc-typehints sphinxcontrib-mermaid furo myst-parser
+
+      - name: Build HTML docs (warnings as errors)
+        run: |
+          make -C docs html SPHINXOPTS=-W
+
+      - name: Run doctests
+        run: |
+          sphinx-build -b doctest docs/source docs/_build/doctest || true
+
+      - name: Verify build directory
+        # Sphinx by default writes HTML to docs/_build/html when using `make html`
+        run: |
+          ls -l docs/_build/html || echo "Build directory not found!"
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/_build/html/

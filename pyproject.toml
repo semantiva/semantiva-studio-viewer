@@ -6,7 +6,7 @@ license = "Apache-2.0"
 readme = "README.md"
 requires-python = ">=3.10.12"
 dependencies = [
-    "semantiva",
+    "semantiva>=0.5.0rc1",
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.20.0",
     "httpx>=0.24.0",
@@ -31,6 +31,19 @@ source = ["semantiva_studio_viewer"]
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
+
+[project.scripts]
+semantiva-studio-viewer = "semantiva_studio_viewer.cli:main"
+
+[tool.pdm.dev-dependencies]
+dev = [
+    "black >=24.10.0",
+    "mypy >=1.14.1",
+    "pylint >=3.3.3",
+    "pytest >=8.3.4",
+    "ruff >=0.1.13",
+    "coverage",
+]
 
 [tool.pdm.scripts]
 serve-pipeline = "python -m semantiva_studio_viewer.cli serve-pipeline"
