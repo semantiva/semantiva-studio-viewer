@@ -165,11 +165,6 @@ def serve_components(ttl_path: str, host: str = "127.0.0.1", port: int = 8000):
 
     import uvicorn
 
-    # Security: Disable debug mode and limit host in production
-    debug_mode = False
-    if host == "127.0.0.1" or host == "localhost":
-        debug_mode = True
-
     try:
         uvicorn.run(app, host=host, port=port, log_level="info")
     except OSError as e:

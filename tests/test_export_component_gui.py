@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 from pathlib import Path
-import pytest
 
 from semantiva_studio_viewer.components import export_components
 

@@ -23,7 +23,7 @@ from .components import serve_components, export_components
 
 def serve_pipeline_command(args) -> None:
     """Handle serve-pipeline command."""
-    serve_pipeline(args.yaml, args.host, args.port, getattr(args, 'trace_jsonl', None))
+    serve_pipeline(args.yaml, args.host, args.port, getattr(args, "trace_jsonl", None))
 
 
 def serve_components_command(args) -> None:
@@ -33,7 +33,7 @@ def serve_components_command(args) -> None:
 
 def export_pipeline_command(args) -> None:
     """Handle export-pipeline command."""
-    export_pipeline(args.yaml, args.output, getattr(args, 'trace_jsonl', None))
+    export_pipeline(args.yaml, args.output, getattr(args, "trace_jsonl", None))
 
 
 def export_components_command(args) -> None:

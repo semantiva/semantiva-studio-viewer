@@ -16,7 +16,6 @@
 
 import argparse
 import json
-from typing import Union, List, Dict
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -42,6 +41,7 @@ def _ensure_trace_loaded():
         return
     try:
         from .trace_index import TraceIndex
+
         trace_file = Path(trace_path)
         if trace_file.exists() and trace_file.is_file():
             app.state.trace_index = TraceIndex.from_jsonl(trace_path)
@@ -107,7 +107,39 @@ def get_pipeline_api():
         # Only configuration data is supported now
         if hasattr(app.state, "config") and app.state.config is not None:
             # app.state.config must be a list of dictionaries
-            return build_pipeline_json(app.state.config)
+            data = build_pipeline_json(app.state.config)
+
+            # Enrich nodes with node_uuid when trace is loaded by positional identity
+            _ensure_trace_loaded()
+            trace_index = getattr(app.state, "trace_index", None)
+            if trace_index and getattr(trace_index, "canonical_nodes", None):
+                # Build index_to_uuid map from trace meta
+                idx_map = {}
+                try:
+                    # Prefer meta builder to avoid duplication
+                    meta = trace_index.get_meta()
+                    idx_map = meta.get("node_mappings", {}).get("index_to_uuid", {})
+                except Exception:
+                    idx_map = {}
+
+                for node in data.get("nodes", []):
+                    # Our inspection nodes are 1-based ids; declaration_index should be 0-based order
+                    di = node.get("declaration_index")
+                    dsub = node.get("declaration_subindex", 0)
+                    # If inspection doesn't provide declaration indices, fall back to position by order
+                    if di is None:
+                        # Node ids are 1-based, convert to 0-based index
+                        try:
+                            di = int(node.get("id", 0)) - 1
+                        except Exception:
+                            di = None
+                    if di is not None:
+                        key = f"{int(di)}:{int(dsub)}"
+                        uuid = idx_map.get(key)
+                        if uuid:
+                            node["node_uuid"] = uuid
+
+            return data
 
         # Neither configuration nor pipeline available
         raise HTTPException(
@@ -132,10 +164,10 @@ def index():
 @app.get("/api/trace/meta")
 def get_trace_meta():
     """Get trace metadata.
-    
+
     Returns:
         Dict containing run_id, pipeline_id, file info, counts, warnings
-        
+
     Raises:
         HTTPException: If no trace is loaded
     """
@@ -144,22 +176,25 @@ def get_trace_meta():
     if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
         raise HTTPException(
             status_code=404,
-            detail="No trace data available. Load a trace file with --trace-jsonl."
+            detail="No trace data available. Load a trace file with --trace-jsonl.",
         )
     meta = app.state.trace_index.get_meta()
     # Also expose canonical nodes (if available) for UI to show declaration_index/subindex
-    if hasattr(app.state.trace_index, 'canonical_nodes') and app.state.trace_index.canonical_nodes:
-        meta['canonical_nodes'] = list(app.state.trace_index.canonical_nodes.values())
+    if (
+        hasattr(app.state.trace_index, "canonical_nodes")
+        and app.state.trace_index.canonical_nodes
+    ):
+        meta["canonical_nodes"] = list(app.state.trace_index.canonical_nodes.values())
     return meta
 
 
 @app.get("/api/trace/summary")
 def get_trace_summary():
     """Get aggregated trace data for all nodes.
-    
+
     Returns:
         Dict with "nodes" key containing per-node aggregates
-        
+
     Raises:
         HTTPException: If no trace is loaded
     """
@@ -167,7 +202,7 @@ def get_trace_summary():
     if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
         raise HTTPException(
             status_code=404,
-            detail="No trace data available. Load a trace file with --trace-jsonl."
+            detail="No trace data available. Load a trace file with --trace-jsonl.",
         )
 
     return app.state.trace_index.summary()
@@ -176,15 +211,15 @@ def get_trace_summary():
 @app.get("/api/trace/node/{node_uuid}")
 def get_trace_node_events(node_uuid: str, offset: int = 0, limit: int = 100):
     """Get detailed events for a specific node.
-    
+
     Args:
         node_uuid: UUID of the node to get events for
         offset: Number of events to skip (for paging)
         limit: Maximum number of events to return
-        
+
     Returns:
         Dict containing events list, total count, and paging info
-        
+
     Raises:
         HTTPException: If no trace is loaded or invalid parameters
     """
@@ -192,25 +227,25 @@ def get_trace_node_events(node_uuid: str, offset: int = 0, limit: int = 100):
     if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
         raise HTTPException(
             status_code=404,
-            detail="No trace data available. Load a trace file with --trace-jsonl."
+            detail="No trace data available. Load a trace file with --trace-jsonl.",
         )
-    
+
     # Validate parameters
     if offset < 0:
         raise HTTPException(status_code=400, detail="Offset must be non-negative")
     if limit < 1 or limit > 1000:
         raise HTTPException(status_code=400, detail="Limit must be between 1 and 1000")
-    
+
     return app.state.trace_index.node_events(node_uuid, offset, limit)
 
 
 @app.get("/api/trace/mapping")
 def get_trace_label_mapping():
     """Get mapping from pipeline node labels to trace UUIDs.
-    
+
     Returns:
         Dict mapping pipeline node labels to trace node UUIDs
-        
+
     Raises:
         HTTPException: If no trace is loaded
     """
@@ -218,9 +253,9 @@ def get_trace_label_mapping():
     if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
         raise HTTPException(
             status_code=404,
-            detail="No trace data available. Load a trace file with --trace-jsonl."
+            detail="No trace data available. Load a trace file with --trace-jsonl.",
         )
-    
+
     # Get pipeline nodes using the same logic as get_pipeline_api
     try:
         if hasattr(app.state, "config") and app.state.config is not None:
@@ -228,43 +263,51 @@ def get_trace_label_mapping():
             nodes = pipeline_data["nodes"]
         else:
             raise HTTPException(
-                status_code=404,
-                detail="Pipeline configuration not found."
+                status_code=404, detail="Pipeline configuration not found."
             )
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to load pipeline data: {e}"
+            status_code=500, detail=f"Failed to load pipeline data: {e}"
         )
-    
-    # Build label to UUID mapping using the trace index matching logic
+
+    # Build positional mapping first, then optional legacy heuristics
+    meta = app.state.trace_index.get_meta()
+    index_to_uuid = meta.get("node_mappings", {}).get("index_to_uuid", {})
+
     label_to_uuid = {}
-    for node in nodes:
-        label = node["label"]
-        # Prefer exact mapping via canonical nodes if present
-        uuid = None
-        if hasattr(app.state.trace_index, 'canonical_nodes') and app.state.trace_index.canonical_nodes:
-            # Try to match by label to FQN or by node metadata
-            for nu, ninfo in app.state.trace_index.canonical_nodes.items():
-                fqn = ninfo.get('fqn')
-                if fqn and label in fqn:
-                    uuid = nu
-                    break
-
-        if not uuid:
-            uuid = app.state.trace_index.find_node_uuid_by_label(label)
-
+    for i, node in enumerate(nodes):
+        # Prefer declaration_index/subindex if present, else derive by order (0-based)
+        di = node.get("declaration_index")
+        dsub = node.get("declaration_subindex", 0)
+        if di is None:
+            di = i  # nodes list is in declaration order
+        key = f"{int(di)}:{int(dsub)}"
+        uuid = index_to_uuid.get(key)
         if uuid:
-            label_to_uuid[label] = uuid
+            label_to_uuid[node["label"]] = uuid
+        else:
+            # Last resort: legacy heuristic
+            legacy_uuid = app.state.trace_index.find_node_uuid_by_label(node["label"])
+            if legacy_uuid:
+                label_to_uuid[node["label"]] = legacy_uuid
 
     return {
         "label_to_uuid": label_to_uuid,
         "available_labels": [node["label"] for node in nodes],
-        "available_fqns": list(app.state.trace_index.fqn_to_node_uuid.keys())
+        "available_fqns": list(app.state.trace_index.fqn_to_node_uuid.keys()),
+        "node_mappings": {
+            "index_to_uuid": index_to_uuid,
+            "uuid_to_index": meta.get("node_mappings", {}).get("uuid_to_index", {}),
+        },
     }
 
 
-def serve_pipeline(yaml_path: str, host: str = "127.0.0.1", port: int = 8000, trace_jsonl: str | None = None):
+def serve_pipeline(
+    yaml_path: str,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    trace_jsonl: str | None = None,
+):
     """Serve pipeline visualization web interface.
 
     Args:
@@ -308,6 +351,7 @@ def serve_pipeline(yaml_path: str, host: str = "127.0.0.1", port: int = 8000, tr
     if trace_jsonl:
         try:
             from .trace_index import TraceIndex
+
             trace_file = Path(trace_jsonl)
             if not trace_file.exists():
                 print(f"Warning: Trace file not found: {trace_jsonl}")
@@ -316,7 +360,9 @@ def serve_pipeline(yaml_path: str, host: str = "127.0.0.1", port: int = 8000, tr
             else:
                 print(f"Loading trace file: {trace_jsonl}")
                 app.state.trace_index = TraceIndex.from_jsonl(trace_jsonl)
-                print(f"Trace loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)")
+                print(
+                    f"Trace loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)"
+                )
         except ImportError:
             print("Warning: TraceIndex not available, trace file will be ignored")
         except Exception as e:
@@ -358,11 +404,6 @@ def serve_pipeline(yaml_path: str, host: str = "127.0.0.1", port: int = 8000, tr
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     import uvicorn
-
-    # Security: Disable debug mode and limit host in production
-    debug_mode = False
-    if host == "127.0.0.1" or host == "localhost":
-        debug_mode = True
 
     try:
         uvicorn.run(app, host=host, port=port, log_level="info")
@@ -414,48 +455,80 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
     if trace_jsonl:
         try:
             from .trace_index import TraceIndex
+
             trace_index = TraceIndex.from_jsonl(trace_jsonl)
-            
+
             # Build trace data for injection
             trace_meta = trace_index.get_meta()
             trace_summary = trace_index.summary()
-            
-            # Build label to UUID mapping
+
+            # Build positional label to UUID mapping using index_to_uuid
             pipeline_data = build_pipeline_json(config)
+            index_to_uuid = trace_meta.get("node_mappings", {}).get("index_to_uuid", {})
             label_to_uuid = {}
-            for node in pipeline_data["nodes"]:
-                label = node["label"]
-                uuid = trace_index.find_node_uuid_by_label(label)
+            for i, node in enumerate(pipeline_data["nodes"]):
+                di = node.get("declaration_index")
+                dsub = node.get("declaration_subindex", 0)
+                if di is None:
+                    di = i
+                key = f"{int(di)}:{int(dsub)}"
+                uuid = index_to_uuid.get(key)
                 if uuid:
-                    label_to_uuid[label] = uuid
-            
+                    label_to_uuid[node["label"]] = uuid
+
             trace_mapping = {
                 "label_to_uuid": label_to_uuid,
                 "available_labels": [node["label"] for node in pipeline_data["nodes"]],
-                "available_fqns": list(trace_index.fqn_to_node_uuid.keys())
+                "available_fqns": list(trace_index.fqn_to_node_uuid.keys()),
+                "node_mappings": {
+                    "index_to_uuid": index_to_uuid,
+                    "uuid_to_index": trace_meta.get("node_mappings", {}).get(
+                        "uuid_to_index", {}
+                    ),
+                },
             }
-            
+
             # Store all trace data
             trace_data = {
                 "meta": trace_meta,
                 "summary": trace_summary,
                 "mapping": trace_mapping,
-                "node_events": {}  # Will be populated with individual node events
+                "node_events": {},  # Will be populated with individual node events
             }
-            
+
             # Pre-load events for all mapped nodes
             for label, uuid in label_to_uuid.items():
                 events_response = trace_index.node_events(uuid, offset=0, limit=100)
                 trace_data["node_events"][uuid] = events_response
-            
-            print(f"Trace data loaded: {trace_meta['run_id']} ({len(label_to_uuid)} nodes mapped)")
-            
+
+            print(
+                f"Trace data loaded: {trace_meta['run_id']} ({len(label_to_uuid)} nodes mapped)"
+            )
+
         except Exception as e:
             print(f"Warning: Failed to load trace data: {e}")
             trace_data = {}
 
     # Only use configuration for build_pipeline_json
     data = build_pipeline_json(config)
+
+    # If we have trace positional mapping, inject node_uuid into exported nodes too
+    if trace_data and "meta" in trace_data:
+        try:
+            idx_map = (
+                trace_data["meta"].get("node_mappings", {}).get("index_to_uuid", {})
+            )
+            for i, node in enumerate(data.get("nodes", [])):
+                di = node.get("declaration_index")
+                dsub = node.get("declaration_subindex", 0)
+                if di is None:
+                    di = i
+                key = f"{int(di)}:{int(dsub)}"
+                uuid = idx_map.get(key)
+                if uuid:
+                    node["node_uuid"] = uuid
+        except Exception:
+            pass
 
     template_dir = Path(__file__).parent / "web_gui"
     template_path = template_dir / "index.html"
@@ -490,7 +563,7 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
     # Create data injection - no escaping needed for JavaScript literals
     data_json = json.dumps(data)
     trace_data_json = json.dumps(trace_data)
-    
+
     # Build trace endpoint mocks if trace data is available
     trace_endpoints = ""
     if trace_data:
@@ -512,7 +585,7 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
     }
     return Promise.resolve({ok: false, status: 404});
   }"""
-    
+
     # Inject as parseable JSON strings to avoid embedding raw JSON directly in HTML
     injection = (
         "<script>\n"

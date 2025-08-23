@@ -12,10 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
-import json
 from pathlib import Path
-import pytest
 
 from semantiva_studio_viewer.pipeline import export_pipeline
 

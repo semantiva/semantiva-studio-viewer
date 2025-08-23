@@ -88,6 +88,124 @@
       return { ...baseStyle, ...typeStyles[type] };
     }
 
+    // Try to pretty-format string representations (JSON preferred, else a Python-ish dict/array heuristic)
+    function formatRepr(raw) {
+      if (!raw || typeof raw !== 'string') return String(raw || '');
+
+      // Try JSON first (gives best structured output)
+      try {
+        const parsed = JSON.parse(raw);
+        return JSON.stringify(parsed, null, 2);
+      } catch (e) {
+        // not JSON, continue
+      }
+
+      // Heuristic pretty-printer. Force expansion for dict-like braces ({}) so
+      // keys appear one-per-line with indentation. Keep short arrays/tuples inline.
+      const indentUnit = '  ';
+      let out = '';
+      let i = 0;
+      const n = raw.length;
+
+      function findMatching(startIdx, openChar) {
+        const pairs = { '{': '}', '[': ']', '(': ')' };
+        const closeChar = pairs[openChar];
+        let depth = 0;
+        let j = startIdx;
+        let inString = false;
+        let strChar = null;
+        let esc = false;
+        for (; j < n; j++) {
+          const ch = raw[j];
+          if (esc) { esc = false; continue; }
+          if (ch === '\\') { esc = true; continue; }
+          if (inString) {
+            if (ch === strChar) { inString = false; strChar = null; }
+            continue;
+          }
+          if (ch === '"' || ch === "'") { inString = true; strChar = ch; continue; }
+          if (ch === openChar) depth += 1;
+          else if (ch === closeChar) {
+            depth -= 1;
+            if (depth === 0) return j; // index of closing char
+          }
+        }
+        return -1;
+      }
+
+      const indent = (d) => indentUnit.repeat(d);
+      let depth = 0;
+      const compactThreshold = 80;
+
+      while (i < n) {
+        const ch = raw[i];
+
+        // Strings: copy verbatim until closing quote
+        if (ch === '"' || ch === "'") {
+          let j = i + 1;
+          let esc = false;
+          for (; j < n; j++) {
+            if (esc) { esc = false; continue; }
+            if (raw[j] === '\\') { esc = true; continue; }
+            if (raw[j] === ch) { j++; break; }
+          }
+          out += raw.slice(i, j);
+          i = j;
+          continue;
+        }
+
+        if (ch === '{' || ch === '[' || ch === '(') {
+          const matchIdx = findMatching(i, ch);
+          if (matchIdx !== -1) {
+            const content = raw.slice(i + 1, matchIdx);
+            // For dictionaries ({}), always expand so keys are on separate lines.
+            // For arrays/tuples keep inline when short and single-line.
+            if (ch !== '{' && content.length <= compactThreshold && !content.includes('\n')) {
+              out += ch + content + raw[matchIdx];
+              i = matchIdx + 1;
+              continue;
+            }
+          }
+
+          // Expand (put contents on following indented lines)
+          out += ch + '\n' + indent(depth + 1);
+          depth += 1;
+          i += 1;
+          continue;
+        }
+
+        if (ch === '}' || ch === ']' || ch === ')') {
+          depth = Math.max(0, depth - 1);
+          out += '\n' + indent(depth) + ch;
+          i += 1;
+          // if next is comma, append it and then newline+indent for next key/elem
+          if (i < n && raw[i] === ',') {
+            out += ',';
+            i += 1;
+            out += '\n' + indent(depth);
+          }
+          continue;
+        }
+
+        if (ch === ',') {
+          // put comma then space so key: value stays on same line but next key starts on new line
+          out += ',';
+          // if we're inside an expanded dict/array, newline + indent; otherwise keep space
+          if (depth > 0) out += '\n' + indent(depth);
+          else out += ' ';
+          i += 1;
+          continue;
+        }
+
+        // default: copy char
+        out += ch;
+        i += 1;
+      }
+
+      // Normalize trailing spaces and return
+      return out.split('\n').map(line => line.replace(/\s+$/,'')).join('\n');
+    }
+
     // Resizable panel hook
     function useResizable(initialWidth, minWidth = 200, maxWidth = 600) {
       const [width, setWidth] = useState(initialWidth);
@@ -933,14 +1051,16 @@
 
       // Function to load trace events for a specific node
       const loadNodeTraceEvents = useCallback((nodeId) => {
-        if (!traceAvailable || !traceLabelToUuid.size || !nodeMap) return;
+  if (!traceAvailable || !nodeMap) return;
         
         // Find the UUID for this node using label mapping
         const nodeInfo = nodeMap[parseInt(nodeId)];
         if (!nodeInfo) return;
         
-        const label = nodeInfo.label;
-        const nodeUuid = traceLabelToUuid.get(label);
+  // Prefer node_uuid directly if present
+  const directUuid = nodeInfo.node_uuid;
+  const label = nodeInfo.label;
+  const nodeUuid = directUuid || (traceLabelToUuid.size ? traceLabelToUuid.get(label) : null);
         
         if (!nodeUuid) {
           console.log(`No UUID mapping found for node label: ${label}`);
@@ -1210,10 +1330,10 @@
                   <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                       <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                        Trace / pipeline_run_id: <span style={{ fontWeight: 'bold' }}>{traceMeta.run_id}</span>
+                        Pipeline_run_id: <span style={{ fontWeight: 'bold' }}>{truncateHash(traceMeta.run_id)}</span>
                       </div>
                       <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                        Pipeline ID: <span style={{ fontWeight: 'bold' }}>{traceMeta.pipeline_id}</span>
+                        Pipeline ID: <span style={{ fontWeight: 'bold' }}>{truncateHash(traceMeta.pipeline_id)}</span>
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
@@ -1403,7 +1523,7 @@
                 </div>
                 
                 <div className="details-section">
-                  <h4 className="details-subheader">Context interaction:</h4>
+                  <h4 className="details-subheader">Context contracts:</h4>
                   
                   {(() => {
                     const hasCreatedKeys = nodeInfo.created_keys && nodeInfo.created_keys.length > 0;
@@ -1418,26 +1538,26 @@
                           color: '#666',
                           fontStyle: 'italic'
                         }}>
-                          This node does not interact with the context.
+                          This node does not use the context.
                         </div>
                       );
                     }
                     
                     return (
                       <div>
-                        {hasCreatedKeys && (
-                          <div className="trace-item">
-                            <strong>Created Keys:</strong> {nodeInfo.created_keys.join(', ')}
-                          </div>
-                        )}
                         {hasRequiredKeys && (
                           <div className="trace-item">
-                            <strong>Required Keys:</strong> {nodeInfo.required_keys.join(', ')}
+                            <strong>Requires:</strong> {nodeInfo.required_keys.join(', ')}
+                          </div>
+                        )}
+                        {hasCreatedKeys && (
+                          <div className="trace-item">
+                            <strong>Produces:</strong> {nodeInfo.created_keys.join(', ')}
                           </div>
                         )}
                         {hasSuppressedKeys && (
                           <div className="trace-item">
-                            <strong>Suppressed Keys:</strong> {nodeInfo.suppressed_keys.join(', ')}
+                            <strong>Removes:</strong> {nodeInfo.suppressed_keys.join(', ')}
                           </div>
                         )}
                       </div>
@@ -1499,13 +1619,13 @@
                       {/* Node identifiers */}
                       {nodeUuid && (
                         <div className="trace-item">
-                          <strong>node_uuid:</strong> {nodeUuid} 
+                          <strong>node_uuid:</strong> {truncateHash(nodeUuid)} 
                           <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(nodeUuid)} style={{ marginLeft: '8px' }}>Copy</button>
                         </div>
                       )}
                       {canonicalInfo && (
                         <div className="trace-item">
-                          <strong>Positional identity:</strong> decl_index={canonicalInfo.declaration_index} · decl_sub={canonicalInfo.declaration_subindex}
+                          <strong>Node index:</strong> {canonicalInfo.declaration_index + 1}
                         </div>
                       )}
 
@@ -1521,7 +1641,7 @@
                         </div>
                       )}
                       <div className="trace-item">
-                        <strong>Status:</strong> {status}
+                        <strong>Execution status:</strong> {status}
                       </div>
 
                       {/* Execution timing (after only) */}
@@ -1542,7 +1662,7 @@
                           <div className="trace-item">
                             <strong>Output Data:</strong>
                           </div>
-                          <pre style={{ maxHeight: '5.5em', overflow: 'auto', fontFamily: 'monospace', background: '#fff', padding: '8px', borderRadius: '4px', marginTop: '4px' }} title={bucket.after.out_data_repr}>{bucket.after.out_data_repr}</pre>
+                          <pre style={{ maxHeight: '250px',overflow: 'auto', fontFamily: 'monospace', background: '#fff', padding: '8px', borderRadius: '4px', marginTop: '4px' }} title={bucket.after.out_data_repr}>{bucket.after.out_data_repr}</pre>
                         </div>
                       )}
 
@@ -1552,7 +1672,7 @@
                           <div className="trace-item">
                             <strong>Output Context:</strong>
                           </div>
-                          <pre style={{ maxHeight: '5.5em', overflow: 'auto', fontFamily: 'monospace', background: '#fff', padding: '8px', borderRadius: '4px', marginTop: '4px' }} title={bucket.after.post_context_repr}>{bucket.after.post_context_repr}</pre>
+                          <pre style={{ maxHeight: '250px', overflow: 'auto', fontFamily: 'monospace', background: '#fff', padding: '8px', borderRadius: '4px', marginTop: '4px' }} title={bucket.after.post_context_repr}>{formatRepr(bucket.after.post_context_repr)}</pre>
                         </div>
                       )}
 
