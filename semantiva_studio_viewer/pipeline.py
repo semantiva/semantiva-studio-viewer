@@ -33,6 +33,24 @@ from semantiva.inspection import (
 app = FastAPI()
 
 
+def _ensure_trace_loaded():
+    """Try to lazily load trace file if app.state.trace_index is not present and a path was provided."""
+    if hasattr(app.state, "trace_index") and app.state.trace_index:
+        return
+    trace_path = getattr(app.state, "trace_jsonl", None)
+    if not trace_path:
+        return
+    try:
+        from .trace_index import TraceIndex
+        trace_file = Path(trace_path)
+        if trace_file.exists() and trace_file.is_file():
+            app.state.trace_index = TraceIndex.from_jsonl(trace_path)
+            print(f"Lazy-loaded trace file: {trace_path}")
+    except Exception as e:
+        print(f"Warning: Failed to lazy-load trace file {trace_path}: {e}")
+        app.state.trace_index = None
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Add security headers to all responses."""
@@ -111,13 +129,149 @@ def index():
     return FileResponse(Path(__file__).parent / "web_gui" / "index.html")
 
 
-def serve_pipeline(yaml_path: str, host: str = "127.0.0.1", port: int = 8000):
+@app.get("/api/trace/meta")
+def get_trace_meta():
+    """Get trace metadata.
+    
+    Returns:
+        Dict containing run_id, pipeline_id, file info, counts, warnings
+        
+    Raises:
+        HTTPException: If no trace is loaded
+    """
+    # Ensure trace is loaded (lazy load if --trace-jsonl was provided but loading deferred)
+    _ensure_trace_loaded()
+    if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No trace data available. Load a trace file with --trace-jsonl."
+        )
+    meta = app.state.trace_index.get_meta()
+    # Also expose canonical nodes (if available) for UI to show declaration_index/subindex
+    if hasattr(app.state.trace_index, 'canonical_nodes') and app.state.trace_index.canonical_nodes:
+        meta['canonical_nodes'] = list(app.state.trace_index.canonical_nodes.values())
+    return meta
+
+
+@app.get("/api/trace/summary")
+def get_trace_summary():
+    """Get aggregated trace data for all nodes.
+    
+    Returns:
+        Dict with "nodes" key containing per-node aggregates
+        
+    Raises:
+        HTTPException: If no trace is loaded
+    """
+    _ensure_trace_loaded()
+    if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No trace data available. Load a trace file with --trace-jsonl."
+        )
+
+    return app.state.trace_index.summary()
+
+
+@app.get("/api/trace/node/{node_uuid}")
+def get_trace_node_events(node_uuid: str, offset: int = 0, limit: int = 100):
+    """Get detailed events for a specific node.
+    
+    Args:
+        node_uuid: UUID of the node to get events for
+        offset: Number of events to skip (for paging)
+        limit: Maximum number of events to return
+        
+    Returns:
+        Dict containing events list, total count, and paging info
+        
+    Raises:
+        HTTPException: If no trace is loaded or invalid parameters
+    """
+    _ensure_trace_loaded()
+    if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No trace data available. Load a trace file with --trace-jsonl."
+        )
+    
+    # Validate parameters
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="Offset must be non-negative")
+    if limit < 1 or limit > 1000:
+        raise HTTPException(status_code=400, detail="Limit must be between 1 and 1000")
+    
+    return app.state.trace_index.node_events(node_uuid, offset, limit)
+
+
+@app.get("/api/trace/mapping")
+def get_trace_label_mapping():
+    """Get mapping from pipeline node labels to trace UUIDs.
+    
+    Returns:
+        Dict mapping pipeline node labels to trace node UUIDs
+        
+    Raises:
+        HTTPException: If no trace is loaded
+    """
+    _ensure_trace_loaded()
+    if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No trace data available. Load a trace file with --trace-jsonl."
+        )
+    
+    # Get pipeline nodes using the same logic as get_pipeline_api
+    try:
+        if hasattr(app.state, "config") and app.state.config is not None:
+            pipeline_data = build_pipeline_json(app.state.config)
+            nodes = pipeline_data["nodes"]
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Pipeline configuration not found."
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load pipeline data: {e}"
+        )
+    
+    # Build label to UUID mapping using the trace index matching logic
+    label_to_uuid = {}
+    for node in nodes:
+        label = node["label"]
+        # Prefer exact mapping via canonical nodes if present
+        uuid = None
+        if hasattr(app.state.trace_index, 'canonical_nodes') and app.state.trace_index.canonical_nodes:
+            # Try to match by label to FQN or by node metadata
+            for nu, ninfo in app.state.trace_index.canonical_nodes.items():
+                fqn = ninfo.get('fqn')
+                if fqn and label in fqn:
+                    uuid = nu
+                    break
+
+        if not uuid:
+            uuid = app.state.trace_index.find_node_uuid_by_label(label)
+
+        if uuid:
+            label_to_uuid[label] = uuid
+
+    return {
+        "label_to_uuid": label_to_uuid,
+        "available_labels": [node["label"] for node in nodes],
+        "available_fqns": list(app.state.trace_index.fqn_to_node_uuid.keys())
+    }
+
+
+def serve_pipeline(yaml_path: str, host: str = "127.0.0.1", port: int = 8000, trace_jsonl: str | None = None):
     """Serve pipeline visualization web interface.
 
     Args:
         yaml_path: Path to pipeline YAML configuration file
         host: Host address to bind to
         port: Port number to listen on
+        trace_jsonl: Optional path to trace JSONL file for execution overlay
 
     Raises:
         FileNotFoundError: If the YAML file doesn't exist
@@ -146,6 +300,28 @@ def serve_pipeline(yaml_path: str, host: str = "127.0.0.1", port: int = 8000):
         raise ValueError(f"Failed to load pipeline configuration: {e}")
 
     app.state.config = config
+    app.state.trace_index = None
+    # Keep the trace path so endpoints can attempt lazy-loading if needed
+    app.state.trace_jsonl = trace_jsonl
+
+    # Initialize trace index if trace file is provided
+    if trace_jsonl:
+        try:
+            from .trace_index import TraceIndex
+            trace_file = Path(trace_jsonl)
+            if not trace_file.exists():
+                print(f"Warning: Trace file not found: {trace_jsonl}")
+            elif not trace_file.is_file():
+                print(f"Warning: Trace path is not a file: {trace_jsonl}")
+            else:
+                print(f"Loading trace file: {trace_jsonl}")
+                app.state.trace_index = TraceIndex.from_jsonl(trace_jsonl)
+                print(f"Trace loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)")
+        except ImportError:
+            print("Warning: TraceIndex not available, trace file will be ignored")
+        except Exception as e:
+            print(f"Warning: Failed to load trace file: {e}")
+            print("Continuing without trace overlay")
 
     # Print inspection information using the raw configuration
     # This works even for invalid configurations that would fail Pipeline construction
@@ -194,12 +370,13 @@ def serve_pipeline(yaml_path: str, host: str = "127.0.0.1", port: int = 8000):
         raise OSError(f"Failed to start server on {host}:{port}: {e}")
 
 
-def export_pipeline(yaml_path: str, output_path: str):
+def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = None):
     """Export pipeline visualization to standalone HTML file.
 
     Args:
         yaml_path: Path to pipeline YAML configuration file
         output_path: Path for output HTML file
+        trace_jsonl: Optional path to trace JSONL file for execution overlay
 
     Raises:
         FileNotFoundError: If the YAML file doesn't exist
@@ -231,6 +408,51 @@ def export_pipeline(yaml_path: str, output_path: str):
         config = load_pipeline_from_yaml(yaml_path)
     except Exception as e:
         raise ValueError(f"Failed to load pipeline configuration: {e}")
+
+    # Load trace data if provided
+    trace_data = {}
+    if trace_jsonl:
+        try:
+            from .trace_index import TraceIndex
+            trace_index = TraceIndex.from_jsonl(trace_jsonl)
+            
+            # Build trace data for injection
+            trace_meta = trace_index.get_meta()
+            trace_summary = trace_index.summary()
+            
+            # Build label to UUID mapping
+            pipeline_data = build_pipeline_json(config)
+            label_to_uuid = {}
+            for node in pipeline_data["nodes"]:
+                label = node["label"]
+                uuid = trace_index.find_node_uuid_by_label(label)
+                if uuid:
+                    label_to_uuid[label] = uuid
+            
+            trace_mapping = {
+                "label_to_uuid": label_to_uuid,
+                "available_labels": [node["label"] for node in pipeline_data["nodes"]],
+                "available_fqns": list(trace_index.fqn_to_node_uuid.keys())
+            }
+            
+            # Store all trace data
+            trace_data = {
+                "meta": trace_meta,
+                "summary": trace_summary,
+                "mapping": trace_mapping,
+                "node_events": {}  # Will be populated with individual node events
+            }
+            
+            # Pre-load events for all mapped nodes
+            for label, uuid in label_to_uuid.items():
+                events_response = trace_index.node_events(uuid, offset=0, limit=100)
+                trace_data["node_events"][uuid] = events_response
+            
+            print(f"Trace data loaded: {trace_meta['run_id']} ({len(label_to_uuid)} nodes mapped)")
+            
+        except Exception as e:
+            print(f"Warning: Failed to load trace data: {e}")
+            trace_data = {}
 
     # Only use configuration for build_pipeline_json
     data = build_pipeline_json(config)
@@ -265,17 +487,42 @@ def export_pipeline(yaml_path: str, output_path: str):
         f'<script type="text/babel">\n{js}\n</script>',
     )
 
-    # Create data injection with proper escaping
-    import html as html_module
-
-    escaped_data = html_module.escape(json.dumps(data))
+    # Create data injection - no escaping needed for JavaScript literals
+    data_json = json.dumps(data)
+    trace_data_json = json.dumps(trace_data)
+    
+    # Build trace endpoint mocks if trace data is available
+    trace_endpoints = ""
+    if trace_data:
+        trace_endpoints = """
+  if (url === '/api/trace/meta') {
+    return Promise.resolve({ok: true, json: () => Promise.resolve(window.TRACE_DATA.meta)});
+  }
+  if (url === '/api/trace/summary') {
+    return Promise.resolve({ok: true, json: () => Promise.resolve(window.TRACE_DATA.summary)});
+  }
+  if (url === '/api/trace/mapping') {
+    return Promise.resolve({ok: true, json: () => Promise.resolve(window.TRACE_DATA.mapping)});
+  }
+  if (url.startsWith('/api/trace/node/')) {
+    const nodeUuid = url.split('/api/trace/node/')[1];
+    const events = window.TRACE_DATA.node_events[nodeUuid];
+    if (events) {
+      return Promise.resolve({ok: true, json: () => Promise.resolve(events)});
+    }
+    return Promise.resolve({ok: false, status: 404});
+  }"""
+    
+    # Inject as parseable JSON strings to avoid embedding raw JSON directly in HTML
     injection = (
         "<script>\n"
-        f"window.PIPELINE_DATA = JSON.parse({json.dumps(escaped_data)});\n"
+        f"window.PIPELINE_DATA = JSON.parse({json.dumps(data_json)});\n"
+        f"window.TRACE_DATA = JSON.parse({json.dumps(trace_data_json)});\n"
         "window.fetch = ((orig) => (url, options) => {\n"
         "  if (url === '/api/pipeline') {\n"
         "    return Promise.resolve({ok: true, json: () => Promise.resolve(window.PIPELINE_DATA)});\n"
         "  }\n"
+        f"{trace_endpoints}\n"
         "  return orig(url, options);\n"
         "})(window.fetch);\n"
         "</script>"

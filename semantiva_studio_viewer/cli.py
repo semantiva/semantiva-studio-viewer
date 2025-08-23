@@ -23,7 +23,7 @@ from .components import serve_components, export_components
 
 def serve_pipeline_command(args) -> None:
     """Handle serve-pipeline command."""
-    serve_pipeline(args.yaml, args.host, args.port)
+    serve_pipeline(args.yaml, args.host, args.port, getattr(args, 'trace_jsonl', None))
 
 
 def serve_components_command(args) -> None:
@@ -33,7 +33,7 @@ def serve_components_command(args) -> None:
 
 def export_pipeline_command(args) -> None:
     """Handle export-pipeline command."""
-    export_pipeline(args.yaml, args.output)
+    export_pipeline(args.yaml, args.output, getattr(args, 'trace_jsonl', None))
 
 
 def export_components_command(args) -> None:
@@ -62,6 +62,9 @@ def main() -> None:
     serve_pipeline_parser.add_argument(
         "--port", type=int, default=8000, help="Port number (default: 8000)"
     )
+    serve_pipeline_parser.add_argument(
+        "--trace-jsonl", help="Path to trace JSONL file", default=None
+    )
     serve_pipeline_parser.set_defaults(func=serve_pipeline_command)
 
     # Serve components command
@@ -86,6 +89,9 @@ def main() -> None:
         "yaml", help="Path to pipeline YAML configuration"
     )
     export_pipeline_parser.add_argument("output", help="Output HTML file path")
+    export_pipeline_parser.add_argument(
+        "--trace-jsonl", help="Path to trace JSONL file", default=None
+    )
     export_pipeline_parser.set_defaults(func=export_pipeline_command)
 
     # Export components command

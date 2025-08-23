@@ -40,6 +40,11 @@
       return Math.max(LAYOUT_CONFIG.minCalloutWidth, textWidth + 16);
     }
 
+    function truncateHash(hash, maxLength = 20) {
+      if (!hash || hash.length <= maxLength) return hash;
+      return hash.substring(0, maxLength) + '...';
+    }
+
     function createCalloutStyle(type, text) {
       const width = calculateCalloutWidth(text);
       const baseStyle = {
@@ -174,7 +179,7 @@
     }
 
     // Individual node component with anchor placeholders
-    function PipelineNode({ node, pos, isSelected, onClick, registerAnchors, width, height }) {
+    function PipelineNode({ node, pos, isSelected, onClick, registerAnchors, width, height, traceAgg, traceOverlayVisible }) {
       const nodeRef = useRef(null);
       const topRefs = useRef([null]);
       const bottomRefs = useRef([null]);
@@ -218,11 +223,23 @@
         (maxCallouts * LAYOUT_CONFIG.calloutHeight) + ((maxCallouts - 1) * LAYOUT_CONFIG.calloutSpacing) : 0;
       const dynamicHeight = Math.max(LAYOUT_CONFIG.baseContentHeight, calloutsHeight + 30);
 
+      // Determine trace status class
+      let traceClass = '';
+      if (traceOverlayVisible && traceAgg) {
+        if (traceAgg.last_phase === 'after' && traceAgg.count_error === 0) {
+          traceClass = 'trace-success';
+        } else if (traceAgg.count_error > 0) {
+          traceClass = 'trace-error';
+        } else {
+          traceClass = 'trace-neutral';
+        }
+      }
+
       return (
         <div
           ref={nodeRef}
           key={node.id}
-          className={`custom-node ${pos.type} ${isSelected ? 'selected' : ''} ${hasErrors ? 'error' : ''}`}
+          className={`custom-node ${pos.type} ${isSelected ? 'selected' : ''} ${hasErrors ? 'error' : ''} ${traceClass}`}
           style={{
             left: pos.x - nodeWidthToUse / 2,
             top: pos.y,
@@ -411,7 +428,7 @@
     }
 
     // Custom Graph Component with dual-channel layout
-    function CustomGraph({ nodes, edges, onNodeClick, selectedNodeId }) {
+    function CustomGraph({ nodes, edges, onNodeClick, selectedNodeId, traceAvailable, traceOverlayVisible, getTraceAggForNode }) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [containerRef, setContainerRef] = useState(null);
   // CoordinateSystem helper instance
@@ -733,6 +750,7 @@
             const pos = nodePositions[node.id];
             if (!pos) return null;
             const isSelected = selectedNodeId === node.id;
+            const traceAgg = traceAvailable && traceOverlayVisible && getTraceAggForNode ? getTraceAggForNode(node.id) : null;
             return (
               <PipelineNode
                 key={node.id}
@@ -743,6 +761,8 @@
                 registerAnchors={registerAnchors}
                 width={LAYOUT_CONFIG.nodeWidth}
                 height={pos.height}
+                traceAgg={traceAgg}
+                traceOverlayVisible={traceOverlayVisible}
               />
             );
           })}
@@ -763,9 +783,18 @@
       const [selectedNodeId, setSelectedNodeId] = useState(null);
       const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
+      // Trace overlay state
+      const [traceAvailable, setTraceAvailable] = useState(false);
+      const [traceMeta, setTraceMeta] = useState(null);
+      const [traceSummary, setTraceSummary] = useState(new Map());
+      const [traceOverlayVisible, setTraceOverlayVisible] = useState(true);
+      const [traceFqnToUuid, setTraceFqnToUuid] = useState(new Map());
+      const [traceLabelToUuid, setTraceLabelToUuid] = useState(new Map());
+      const [nodeTraceEvents, setNodeTraceEvents] = useState(new Map());
+
       // Resizable panels
       const sidebar = useResizable(400, 200, 600);
-      const details = useResizableRight(300, 200, 500);
+      const details = useResizableRight(375, 200, 500);
 
       useEffect(() => {
         console.log('Loading pipeline data...');
@@ -837,6 +866,63 @@
             setRfEdges(e); 
             setNodeMap(map);
             setLoading(false);
+            
+            // Try to load trace data if available
+            fetch('/api/trace/meta')
+              .then(r => {
+                if (r.ok) return r.json();
+                throw new Error('No trace data');
+              })
+              .then(meta => {
+                console.log('Trace metadata loaded:', meta);
+                setTraceMeta(meta);
+                setTraceAvailable(true);
+                
+                // Store FQN to UUID mappings
+                if (meta.node_mappings && meta.node_mappings.fqn_to_uuid) {
+                  const mappings = new Map();
+                  Object.entries(meta.node_mappings.fqn_to_uuid).forEach(([fqn, uuid]) => {
+                    mappings.set(fqn, uuid);
+                  });
+                  setTraceFqnToUuid(mappings);
+                }
+                
+                // Load trace summary
+                return fetch('/api/trace/summary');
+              })
+              .then(r => {
+                if (r.ok) return r.json();
+                throw new Error('Failed to load trace summary');
+              })
+              .then(summary => {
+                console.log('Trace summary loaded:', summary);
+                const summaryMap = new Map();
+                if (summary.nodes) {
+                  Object.entries(summary.nodes).forEach(([nodeUuid, agg]) => {
+                    summaryMap.set(nodeUuid, agg);
+                  });
+                }
+                setTraceSummary(summaryMap);
+                
+                // Load label to UUID mapping
+                return fetch('/api/trace/mapping');
+              })
+              .then(r => {
+                if (r.ok) return r.json();
+                throw new Error('Failed to load trace mapping');
+              })
+              .then(mapping => {
+                console.log('Trace label mapping loaded:', mapping);
+                const labelMap = new Map();
+                Object.entries(mapping.label_to_uuid || {}).forEach(([label, uuid]) => {
+                  labelMap.set(label, uuid);
+                });
+                setTraceLabelToUuid(labelMap);
+              })
+              .catch(err => {
+                console.log('No trace data available:', err.message);
+                setTraceAvailable(false);
+              });
           })
           .catch(err => {
             console.error('Error loading pipeline:', err);
@@ -844,6 +930,92 @@
             setLoading(false);
           });
       }, []);
+
+      // Function to load trace events for a specific node
+      const loadNodeTraceEvents = useCallback((nodeId) => {
+        if (!traceAvailable || !traceLabelToUuid.size || !nodeMap) return;
+        
+        // Find the UUID for this node using label mapping
+        const nodeInfo = nodeMap[parseInt(nodeId)];
+        if (!nodeInfo) return;
+        
+        const label = nodeInfo.label;
+        const nodeUuid = traceLabelToUuid.get(label);
+        
+        if (!nodeUuid) {
+          console.log(`No UUID mapping found for node label: ${label}`);
+          return;
+        }
+        
+        // Check if we already have events for this node
+        if (nodeTraceEvents.has(nodeUuid)) return;
+        
+        console.log(`Loading trace events for node ${nodeId} (label: ${label}, UUID: ${nodeUuid})`);
+        
+        fetch(`/api/trace/node/${nodeUuid}`)
+          .then(r => {
+            if (r.ok) return r.json();
+            throw new Error(`Failed to load events for node ${nodeUuid}`);
+          })
+          .then(response => {
+            const events = response.events || [];
+            console.log(`Loaded ${events.length} trace events for node ${nodeId}`);
+            setNodeTraceEvents(prev => new Map(prev).set(nodeUuid, events));
+          })
+          .catch(err => {
+            console.log(`Failed to load trace events for node ${nodeId}:`, err.message);
+          });
+      }, [traceAvailable, traceLabelToUuid, nodeMap, nodeTraceEvents]);
+
+      // Load trace events when a node is selected
+      useEffect(() => {
+        if (selectedNodeId && traceAvailable) {
+          loadNodeTraceEvents(selectedNodeId);
+        }
+      }, [selectedNodeId, traceAvailable, loadNodeTraceEvents]);
+
+      // Helper function to get trace aggregation for a node
+      const getTraceAggForNode = (nodeId) => {
+        if (!traceAvailable || !nodeMap[parseInt(nodeId)]) return null;
+        
+        const node = nodeMap[parseInt(nodeId)];
+        
+        // Try to find trace data by node_uuid if available
+        if (node.node_uuid) {
+          return traceSummary.get(node.node_uuid);
+        }
+        
+        // Fallback: try to find by label matching with FQN patterns
+        const label = node.label;
+        if (label && traceFqnToUuid.size > 0) {
+          // Try exact matches first
+          for (const [fqn, nodeUuid] of traceFqnToUuid.entries()) {
+            // Extract component name from FQN
+            const parts = fqn.split(":");
+            let componentName;
+            if (parts.length >= 2) {
+              // For sweep/slicer style FQNs, take the middle part
+              componentName = parts[1];
+            } else {
+              // For direct FQNs, take the whole thing
+              componentName = fqn;
+            }
+            
+            if (componentName === label) {
+              return traceSummary.get(nodeUuid);
+            }
+          }
+          
+          // Try partial matches
+          for (const [fqn, nodeUuid] of traceFqnToUuid.entries()) {
+            if (fqn.includes(label)) {
+              return traceSummary.get(nodeUuid);
+            }
+          }
+        }
+        
+        return null;
+      };
 
       const onNodeClick = (_, node) => {
         console.log('Node clicked:', node);
@@ -1034,10 +1206,57 @@
                     Invalid Pipeline
                   </span>
                 )}
+                {traceAvailable && traceMeta && (
+                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                        Trace / pipeline_run_id: <span style={{ fontWeight: 'bold' }}>{traceMeta.run_id}</span>
+                      </div>
+                      <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                        Pipeline ID: <span style={{ fontWeight: 'bold' }}>{traceMeta.pipeline_id}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.run_id)} style={{ padding: '4px 8px' }}>Copy run_id</button>
+                      <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.pipeline_id)} style={{ padding: '4px 8px' }}>Copy pipeline_id</button>
+                      <button
+                        onClick={() => setTraceOverlayVisible(!traceOverlayVisible)}
+                        style={{
+                          background: traceOverlayVisible ? '#28a745' : '#6c757d',
+                          color: 'white',
+                          border: 'none',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {traceOverlayVisible ? 'Hide' : 'Show'} Overlay
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#666' }}>
                 {rfNodes.length} nodes • {rfEdges.length} connections
               </p>
+              {/* Pipeline input snapshot chips (if available in trace meta) */}
+              {traceMeta && (traceMeta.pipeline_input_repr || traceMeta.pipeline_input_context_repr) && (
+                <div style={{ marginTop: '6px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {traceMeta.pipeline_input_repr && (
+                    <div style={{ fontFamily: 'monospace', maxWidth: '40%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={traceMeta.pipeline_input_repr}>
+                      Input Data: {traceMeta.pipeline_input_repr}
+                      <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.pipeline_input_repr)} style={{ marginLeft: '8px' }}>Copy</button>
+                    </div>
+                  )}
+                  {traceMeta.pipeline_input_context_repr && (
+                    <div style={{ fontFamily: 'monospace', maxWidth: '40%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={traceMeta.pipeline_input_context_repr}>
+                      Input Context: {traceMeta.pipeline_input_context_repr}
+                      <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.pipeline_input_context_repr)} style={{ marginLeft: '8px' }}>Copy</button>
+                    </div>
+                  )}
+                </div>
+              )}
               {pipelineInfo && pipelineInfo.required_context_keys && pipelineInfo.required_context_keys.length > 0 && (
                 <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#666' }}>
                   <span style={{ fontWeight: 'bold' }}>Required context keys:</span> {pipelineInfo.required_context_keys.join(', ')}
@@ -1049,6 +1268,9 @@
               edges={rfEdges} 
               onNodeClick={onNodeClick}
               selectedNodeId={selectedNodeId}
+              traceAvailable={traceAvailable}
+              traceOverlayVisible={traceOverlayVisible}
+              getTraceAggForNode={getTraceAggForNode}
             />
           </div>
           <div id="details" style={{ 
@@ -1061,167 +1283,326 @@
             />
             {nodeInfo ? (
               <div>
-                <h3 style={{ color: '#48484a', borderBottom: '2px solid #5856d6', paddingBottom: '5px' }}>
-                  {nodeInfo.label}
-                </h3>
-                
-                {nodeInfo.docstring && (
-                  <div style={{ 
-                    marginBottom: '15px', 
-                    padding: '12px', 
-                    background: '#f8f9fa', 
-                    borderLeft: '4px solid #48484a',
-                    borderRadius: '6px',
-                    fontStyle: 'italic',
-                    fontSize: '14px',
-                    color: '#48484a'
-                  }}>
-                    {nodeInfo.docstring}
+                <div style={{ 
+                  marginBottom: '16px',
+                  padding: '16px',
+                  background: 'white',
+                  border: '1px solid #e8e9ea',
+                  borderRadius: '8px',
+                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.06)'
+                }}>
+                  <h3 style={{ color: '#48484a', borderBottom: '2px solid #5856d6', paddingBottom: '8px', margin: '0 0 12px 0' }}>
+                    {nodeInfo.label}
+                  </h3>
+                  
+                  {nodeInfo.docstring && (
+                    <div style={{ 
+                      padding: '12px', 
+                      background: '#f8f9fa', 
+                      borderLeft: '4px solid #48484a',
+                      borderRadius: '6px',
+                      fontStyle: 'italic',
+                      fontSize: '14px',
+                      color: '#48484a',
+                      marginTop: '12px'
+                    }}>
+                      {nodeInfo.docstring}
+                    </div>
+                  )}
+                  
+                  {/* Contract information in the same card */}
+                  <div style={{ marginTop: '16px' }}>
+                    {nodeInfo.input_type && (
+                      <div className="contract-item">
+                        <strong>Input Type:</strong> {nodeInfo.input_type}
+                      </div>
+                    )}
+                    
+                    {nodeInfo.output_type && (
+                      <div className="contract-item">
+                        <strong>Output Type:</strong> {nodeInfo.output_type}
+                      </div>
+                    )}
+                    
+                    <div className="contract-item">
+                      <strong>Role:</strong> {nodeInfo.component_type}
+                    </div>
                   </div>
-                )}
-                
-                {nodeInfo.input_type && (
-                  <div style={{ marginBottom: '10px', padding: '8px', background: '#e8f5ea', borderRadius: '6px', borderLeft: '3px solid #34c759' }}>
-                    <strong style={{ color: '#34c759' }}>Input Type:</strong> {nodeInfo.input_type}
-                  </div>
-                )}
-                
-                {nodeInfo.output_type && (
-                  <div style={{ marginBottom: '10px', padding: '8px', background: '#fff4e6', borderRadius: '6px', borderLeft: '3px solid #ff9500' }}>
-                    <strong style={{ color: '#ff9500' }}>Output Type:</strong> {nodeInfo.output_type}
-                  </div>
-                )}
-                
-                <div style={{ marginBottom: '10px', padding: '8px', background: '#eeecff', borderRadius: '6px', borderLeft: '3px solid #5856d6' }}>
-                  <strong style={{ color: '#5856d6' }}>Type:</strong> {nodeInfo.component_type}
                 </div>
                 
-                <div>
-                  <p><b>Parameters:</b></p>
+                <div className="details-section">
+                  <h4 className="details-subheader">Parameter provenance:</h4>
                   
                   {nodeInfo.parameter_resolution && nodeInfo.parameter_resolution.required_params && 
                    nodeInfo.parameter_resolution.required_params.length > 0 ? (
                     <div>
                       {/* Parameters from pipeline configuration */}
-                      <div style={{marginTop: '10px'}}>
-                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#8e8e93'}}>From Pipeline Configuration:</p>
-                        {Object.keys(nodeInfo.parameter_resolution.from_pipeline_config || {}).length > 0 ? (
-                          <div style={{
-                            background: '#f2f2f7', 
-                            padding: '8px', 
-                            borderRadius: '4px',
-                            border: '1px solid #d1d1d6',
-                            fontSize: '12px'
-                          }}>
-                            {Object.entries(nodeInfo.parameter_resolution.from_pipeline_config).map(([key, details]) => (
-                              <div key={key} style={{marginBottom: '3px'}}>
-                                <span style={{fontWeight: 'bold'}}>{key}:</span> {
-                                  typeof details === 'object' && details.value !== undefined ? 
-                                    details.value + (details.source === 'default' ? ' [default]' : '') :
-                                    details
-                                }
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div style={{
-                            background: '#f8f9fa',
-                            padding: '8px',
-                            borderRadius: '4px',
-                            color: '#666',
-                            fontSize: '12px'
-                          }}>None</div>
-                        )}
-                      </div>
+                      {Object.keys(nodeInfo.parameter_resolution.from_pipeline_config || {}).length > 0 && (
+                        <div className="prov-box prov-box-config">
+                          <div className="prov-header">From Pipeline Configuration:</div>
+                          {Object.entries(nodeInfo.parameter_resolution.from_pipeline_config).map(([key, details]) => (
+                            <div key={key} className="trace-item">
+                              <strong>{key}:</strong> {
+                                typeof details === 'object' && details.value !== undefined ? 
+                                  details.value + (details.source === 'default' ? ' [default]' : '') :
+                                  details
+                              }
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       
                       {/* Parameters from processor defaults */}
-                      <div style={{marginTop: '10px'}}>
-                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#ff9f0a'}}>From Processor Defaults:</p>
-                        {Object.keys(nodeInfo.parameter_resolution.from_processor_defaults || {}).length > 0 ? (
-                          <div style={{
-                            background: '#fff4e6', 
-                            padding: '8px', 
-                            borderRadius: '4px',
-                            border: '1px solid #ffe0b3',
-                            fontSize: '12px'
-                          }}>
-                            {Object.entries(nodeInfo.parameter_resolution.from_processor_defaults).map(([key, details]) => (
-                              <div key={key} style={{marginBottom: '3px'}}>
-                                <span style={{fontWeight: 'bold'}}>{key}:</span> {
-                                  typeof details === 'object' && details.value !== undefined ? 
-                                    details.value :
-                                    details
-                                }
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div style={{
-                            background: '#f8f9fa',
-                            padding: '8px',
-                            borderRadius: '4px',
-                            color: '#666',
-                            fontSize: '12px'
-                          }}>None</div>
-                        )}
-                      </div>
+                      {Object.keys(nodeInfo.parameter_resolution.from_processor_defaults || {}).length > 0 && (
+                        <div className="prov-box prov-box-default">
+                          <div className="prov-header">From Processor Defaults:</div>
+                          {Object.entries(nodeInfo.parameter_resolution.from_processor_defaults).map(([key, details]) => (
+                            <div key={key} className="trace-item">
+                              <strong>{key}:</strong> {
+                                typeof details === 'object' && details.value !== undefined ? 
+                                  details.value :
+                                  details
+                              }
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       
                       {/* Parameters from context */}
-                      <div style={{marginTop: '10px'}}>
-                        <p style={{margin: '0 0 5px 0', fontWeight: 'bold', color: '#af52de'}}>From Context:</p>
-                        {Object.keys(nodeInfo.parameter_resolution.from_context || {}).length > 0 ? (
-                          <div style={{
-                            background: '#f5e6ff', 
-                            padding: '8px', 
-                            borderRadius: '4px',
-                            border: '1px solid #e6ccff',
-                            fontSize: '12px'
-                          }}>
-                            {Object.entries(nodeInfo.parameter_resolution.from_context).map(([key, details]) => (
-                              <div key={key} style={{marginBottom: '3px'}}>
-                                <span style={{fontWeight: 'bold'}}>{key}:</span> {
-                                  typeof details === 'object' && details.source !== undefined ? (
-                                    details.source !== "Initial Context" ? (
-                                      <span>From <span style={{color: '#af52de', fontWeight: 'bold'}}>Node {details.source_idx}</span></span>
-                                    ) : (
-                                      <span>From <span style={{color: '#ff3b30', fontWeight: 'bold'}}>Initial Context</span></span>
-                                    )
+                      {Object.keys(nodeInfo.parameter_resolution.from_context || {}).length > 0 && (
+                        <div className="prov-box prov-box-context">
+                          <div className="prov-header">From Context:</div>
+                          {Object.entries(nodeInfo.parameter_resolution.from_context).map(([key, details]) => (
+                            <div key={key} className="trace-item">
+                              <strong>{key}:</strong> {
+                                typeof details === 'object' && details.source !== undefined ? (
+                                  details.source !== "Initial Context" ? (
+                                    <span>From <span style={{color: '#af52de', fontWeight: 'bold'}}>Node {details.source_idx}</span></span>
                                   ) : (
-                                    details
+                                    <span>From <span style={{color: '#ff3b30', fontWeight: 'bold'}}>Initial Context</span></span>
                                   )
-                                }
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div style={{
-                            background: '#f8f9fa',
-                            padding: '8px',
-                            borderRadius: '4px',
-                            color: '#666',
-                            fontSize: '12px'
-                          }}>None</div>
-                        )}
-                      </div>
+                                ) : (
+                                  details
+                                )
+                              }
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
-                    <div style={{
+                    <div className="prov-box" style={{
                       background: '#f8f9fa', 
-                      padding: '8px', 
-                      borderRadius: '4px',
+                      borderLeft: '3px solid #666',
                       color: '#666',
-                      fontSize: '12px'
+                      fontStyle: 'italic'
                     }}>
                       This node does not require any parameters.
                     </div>
                   )}
                 </div>
                 
-                <div style={{ marginBottom: '10px' }}>
-                  <p><b>Created Keys:</b> {nodeInfo.created_keys && nodeInfo.created_keys.length > 0 ? nodeInfo.created_keys.join(', ') : 'None'}</p>
-                  <p><b>Required Keys:</b> {nodeInfo.required_keys && nodeInfo.required_keys.length > 0 ? nodeInfo.required_keys.join(', ') : 'None'}</p>
-                  <p><b>Suppressed Keys:</b> {nodeInfo.suppressed_keys && nodeInfo.suppressed_keys.length > 0 ? nodeInfo.suppressed_keys.join(', ') : 'None'}</p>
+                <div className="details-section">
+                  <h4 className="details-subheader">Context interaction:</h4>
+                  
+                  {(() => {
+                    const hasCreatedKeys = nodeInfo.created_keys && nodeInfo.created_keys.length > 0;
+                    const hasRequiredKeys = nodeInfo.required_keys && nodeInfo.required_keys.length > 0;
+                    const hasSuppressedKeys = nodeInfo.suppressed_keys && nodeInfo.suppressed_keys.length > 0;
+                    
+                    if (!hasCreatedKeys && !hasRequiredKeys && !hasSuppressedKeys) {
+                      return (
+                        <div className="prov-box" style={{
+                          background: '#f8f9fa', 
+                          borderLeft: '3px solid #666',
+                          color: '#666',
+                          fontStyle: 'italic'
+                        }}>
+                          This node does not interact with the context.
+                        </div>
+                      );
+                    }
+                    
+                    return (
+                      <div>
+                        {hasCreatedKeys && (
+                          <div className="trace-item">
+                            <strong>Created Keys:</strong> {nodeInfo.created_keys.join(', ')}
+                          </div>
+                        )}
+                        {hasRequiredKeys && (
+                          <div className="trace-item">
+                            <strong>Required Keys:</strong> {nodeInfo.required_keys.join(', ')}
+                          </div>
+                        )}
+                        {hasSuppressedKeys && (
+                          <div className="trace-item">
+                            <strong>Suppressed Keys:</strong> {nodeInfo.suppressed_keys.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
+                
+                {/* Trace Information Section */}
+                {traceMeta && traceOverlayVisible && (function() {
+                  // Bind by node_uuid when possible. Prefer canonical_nodes or mappings from trace meta.
+                  const currentNode = nodeMap[parseInt(selectedNodeId)];
+                  let nodeUuid = null;
+
+                  // If the pipeline emitted node_uuid (nodeMap may include it)
+                  if (currentNode && currentNode.node_uuid) nodeUuid = currentNode.node_uuid;
+
+                  // Otherwise, try mapping via label -> uuid
+                  if (!nodeUuid && traceLabelToUuid && currentNode) {
+                    nodeUuid = traceLabelToUuid.get(currentNode.label);
+                  }
+
+                  // Also try matching via canonical_nodes data in traceMeta
+                  let canonicalInfo = null;
+                  if (!nodeUuid && traceMeta && traceMeta.node_mappings && traceMeta.node_mappings.fqn_to_uuid) {
+                    // try to find by fqn that contains the label
+                    for (const [fqn, uuid] of Object.entries(traceMeta.node_mappings.fqn_to_uuid)) {
+                      if (currentNode && currentNode.label && fqn.includes(currentNode.label)) {
+                        nodeUuid = uuid; break;
+                      }
+                    }
+                  }
+
+                  // If traceIndex exposed canonical_nodes list, find declaration_index/subindex
+                  if (traceMeta && traceMeta.canonical_nodes && nodeUuid) {
+                    canonicalInfo = traceMeta.canonical_nodes.find(n => n.node_uuid === nodeUuid) || null;
+                  }
+
+                  const nodeEvents = nodeUuid ? (nodeTraceEvents.get(nodeUuid) || []) : [];
+
+                  // Bucket latest before/after/error events
+                  const bucket = { before: null, after: null, error: null };
+                  nodeEvents.forEach(ev => {
+                    if (ev.phase === 'before') bucket.before = ev;
+                    else if (ev.phase === 'after') bucket.after = ev;
+                    else if (ev.phase === 'error') bucket.error = ev;
+                  });
+
+                  // Derive timestamps and status
+                  const started = bucket.before ? bucket.before.event_time_utc : undefined;
+                  const ended = bucket.after ? bucket.after.event_time_utc : (bucket.error ? bucket.error.event_time_utc : undefined);
+                  let status = 'Started';
+                  if (bucket.after) status = 'Completed';
+                  else if (bucket.error) status = 'Error';
+
+                  return (
+                    <div className="details-section">
+                      <h4 className="details-subheader">Trace records:</h4>
+
+                      {/* Node identifiers */}
+                      {nodeUuid && (
+                        <div className="trace-item">
+                          <strong>node_uuid:</strong> {nodeUuid} 
+                          <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(nodeUuid)} style={{ marginLeft: '8px' }}>Copy</button>
+                        </div>
+                      )}
+                      {canonicalInfo && (
+                        <div className="trace-item">
+                          <strong>Positional identity:</strong> decl_index={canonicalInfo.declaration_index} · decl_sub={canonicalInfo.declaration_subindex}
+                        </div>
+                      )}
+
+                      {/* Timestamps and status */}
+                      {started && (
+                        <div className="trace-item">
+                          <strong>Started:</strong> {started}
+                        </div>
+                      )}
+                      {ended && (
+                        <div className="trace-item">
+                          <strong>Ended:</strong> {ended}
+                        </div>
+                      )}
+                      <div className="trace-item">
+                        <strong>Status:</strong> {status}
+                      </div>
+
+                      {/* Execution timing (after only) */}
+                      {bucket.after && bucket.after.t_wall !== undefined && bucket.after.t_wall !== null && (
+                        <div className="trace-item">
+                          <strong>Wall Time:</strong> {Number(bucket.after.t_wall).toFixed(6).replace(/\.0+$/,'')}s
+                        </div>
+                      )}
+                      {bucket.after && bucket.after.t_cpu !== undefined && bucket.after.t_cpu !== null && (
+                        <div className="trace-item">
+                          <strong>CPU Time:</strong> {Number(bucket.after.t_cpu).toFixed(6).replace(/\.0+$/,'')}s
+                        </div>
+                      )}
+
+                      {/* Output Data */}
+                      {bucket.after && bucket.after.out_data_repr && (
+                        <div style={{ marginTop: '8px' }}>
+                          <div className="trace-item">
+                            <strong>Output Data:</strong>
+                          </div>
+                          <pre style={{ maxHeight: '5.5em', overflow: 'auto', fontFamily: 'monospace', background: '#fff', padding: '8px', borderRadius: '4px', marginTop: '4px' }} title={bucket.after.out_data_repr}>{bucket.after.out_data_repr}</pre>
+                        </div>
+                      )}
+
+                      {/* Output Context */}
+                      {bucket.after && bucket.after.post_context_repr && (
+                        <div style={{ marginTop: '8px' }}>
+                          <div className="trace-item">
+                            <strong>Output Context:</strong>
+                          </div>
+                          <pre style={{ maxHeight: '5.5em', overflow: 'auto', fontFamily: 'monospace', background: '#fff', padding: '8px', borderRadius: '4px', marginTop: '4px' }} title={bucket.after.post_context_repr}>{bucket.after.post_context_repr}</pre>
+                        </div>
+                      )}
+
+                      {/* Data and Context Hashes */}
+                      {bucket.after && bucket.after.out_data_hash && (
+                        <div className="trace-item">
+                          <strong>Data Hash:</strong> 
+                          <span style={{ fontFamily: 'monospace', marginLeft: '8px' }} title={bucket.after.out_data_hash}>
+                            {truncateHash(bucket.after.out_data_hash)}
+                          </span>
+                          <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(bucket.after.out_data_hash)} style={{ marginLeft: '6px' }}>Copy</button>
+                        </div>
+                      )}
+                      {bucket.after && bucket.after.post_context_hash && (
+                        <div className="trace-item">
+                          <strong>Context Hash:</strong> 
+                          <span style={{ fontFamily: 'monospace', marginLeft: '8px' }} title={bucket.after.post_context_hash}>
+                            {truncateHash(bucket.after.post_context_hash)}
+                          </span>
+                          <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(bucket.after.post_context_hash)} style={{ marginLeft: '6px' }}>Copy</button>
+                        </div>
+                      )}
+
+                      {/* Error summary */}
+                      {bucket.error && (
+                        <div style={{ marginTop: '8px', padding: '10px', border: '1px solid #f8d7da', background: '#fff5f6', borderRadius: '6px' }}>
+                          <div className="trace-item"><strong>Error Type:</strong> {bucket.error.error_type}</div>
+                          {bucket.error.error_msg && (
+                            <div className="trace-item" title={bucket.error.error_msg}>
+                              <strong>Message:</strong> {String(bucket.error.error_msg).split('\n')[0]} 
+                              <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(bucket.error.error_msg)} style={{ marginLeft: '6px' }}>Copy</button>
+                            </div>
+                          )}
+                          {bucket.error._raw && bucket.error._raw.traceback && (
+                            <div style={{ marginTop: '6px' }}>
+                              <div className="trace-item"><strong>Traceback:</strong></div>
+                              <pre style={{ maxHeight: '8em', overflow: 'auto', fontFamily: 'monospace', background: '#fff', padding: '8px', borderRadius: '4px', marginTop: '4px' }}>{bucket.error._raw.traceback}</pre>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!bucket.after && !bucket.error && bucket.before && (
+                        <div style={{ marginTop: '8px', padding: '10px', border: '1px solid #eef4ff', background: '#fbfdff', borderRadius: '6px' }}>
+                          <div className="trace-item">Node execution has started but no completion or error event recorded yet.</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 
                 {/* Errors Section */}
                 {nodeInfo.errors && nodeInfo.errors.length > 0 && (

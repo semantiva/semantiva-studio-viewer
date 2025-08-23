@@ -55,13 +55,13 @@ body, html {
   position: relative;
 }
 #details { 
-  width:300px; 
+  width:375px; 
   min-width: 200px;
   max-width: 500px;
   border-left:1px solid var(--neutral-border); 
   overflow:auto; 
   padding:20px; 
-  background: white;
+  background: #fafbfc;
   position: relative;
 }
 #graph { flex:1; overflow:auto; position: relative; background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); }
@@ -342,6 +342,83 @@ body, html {
       font-weight: 600;
       border-bottom: 2px solid var(--type-primary);
       padding-bottom: 8px;
+    }
+    
+    /* Subheader styling for detail sections - Card-compatible */
+    .details-subheader {
+      margin: 0 0 12px 0;
+      color: var(--neutral-primary);
+      font-size: 16px;
+      font-weight: 700;
+      border-bottom: 2px solid #e8e9ea;
+      padding-bottom: 8px;
+    }
+    
+    /* Section containers for better visual separation - Card-like styling */
+    .details-section {
+      margin: 16px 0;
+      padding: 16px;
+      background: white;
+      border: 1px solid #e8e9ea;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+      transition: box-shadow 0.2s ease;
+    }
+    
+    .details-section:hover {
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .details-section:first-child {
+      margin-top: 0;
+    }
+    
+    /* Contract items styling (Input Type, Output Type, Role) - Card-compatible */
+    .contract-item {
+      margin: 8px 0;
+      padding: 10px 12px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      border-left: 3px solid #dee2e6;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    
+    .contract-item strong {
+      font-weight: 600;
+      color: var(--neutral-primary);
+    }
+    
+    /* Provenance box styling - Card-compatible, simplified */
+    .prov-box {
+      margin: 8px 0;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #dee2e6;
+      background: #f8f9fa;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    
+    .prov-box-config .prov-header,
+    .prov-box-default .prov-header,
+    .prov-box-context .prov-header {
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--neutral-primary);
+    }
+    
+    /* Trace and context item styling */
+    .trace-item {
+      margin: 6px 0;
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--neutral-primary);
+    }
+    
+    .trace-item strong {
+      font-weight: 600;
+      color: var(--neutral-primary);
     }
     
     #details p {
