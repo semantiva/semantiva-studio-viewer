@@ -16,6 +16,7 @@
 
 import argparse
 import json
+from fastapi.encoders import jsonable_encoder
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -90,7 +91,8 @@ def build_pipeline_json(config: list[dict]) -> dict:
         pass
 
     # Convert inspection data to JSON format suitable for web visualization
-    return json_report(inspection)
+    # and normalize via jsonable_encoder to ensure full JSON-serializability
+    return jsonable_encoder(json_report(inspection))
 
 
 @app.get("/api/pipeline")
@@ -560,9 +562,11 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
         f'<script type="text/babel">\n{js}\n</script>',
     )
 
-    # Create data injection - no escaping needed for JavaScript literals
-    data_json = json.dumps(data)
-    trace_data_json = json.dumps(trace_data)
+    # Create data injection - encode objects consistently with FastAPI responses
+    encoded_data = jsonable_encoder(data)
+    encoded_trace = jsonable_encoder(trace_data)
+    data_json = json.dumps(encoded_data)
+    trace_data_json = json.dumps(encoded_trace)
 
     # Build trace endpoint mocks if trace data is available
     trace_endpoints = ""
