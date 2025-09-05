@@ -690,16 +690,20 @@
       // Process all nodes in their original order, just split horizontally by type
       nodes.forEach((node, originalIndex) => {
         const label = node.data.label || '';
+        const componentType = node.data.componentType || '';
         let nodeType, xPos;
         
-        // Determine node category and horizontal position
-        if (label.includes('Source') || label.includes('Sink') || label.includes('DataSource') || label.includes('DataSink')) {
+        // Determine node category and horizontal position using component_type first, then fallback to name-based detection
+        if (componentType === 'PayloadSourceNode' || componentType === 'PayloadSinkNode' || 
+            label.includes('Source') || label.includes('Sink') || label.includes('DataSource') || label.includes('DataSink')) {
           nodeType = 'source-sink';
           xPos = centerPosition;
-        } else if (label.includes('Context') || label.includes('Rename') || label.includes('Delete')) {
+        } else if (componentType === 'ContextProcessorNode' || 
+                   label.includes('Context') || label.includes('Rename') || label.includes('Delete')) {
           nodeType = 'context-processor';
           xPos = rightChannelCenter;
         } else {
+          // DataOperationNode, ProbeResultCollectorNode, and other data processing nodes
           nodeType = 'data-processor';
           xPos = leftChannelCenter;
         }
@@ -950,6 +954,7 @@
                 id: String(node.id),
                 data: {
                   label: node.label,
+                  componentType: node.component_type || '',
                   inputType: node.input_type || '',
                   outputType: node.output_type || '',
                   pipelineConfigParams: configParams,
@@ -1206,13 +1211,14 @@
                 DATA PROCESSING
               </h4>
               {Object.values(nodeMap)
-                .filter(n => 
-                  !n.label.includes('Source') && 
-                  !n.label.includes('Sink') && 
-                  !n.label.includes('Context') && 
-                  !n.label.includes('Rename') && 
-                  !n.label.includes('Delete')
-                )
+                .filter(n => {
+                  // Use component_type first, fallback to name-based detection
+                  const isSourceSink = n.component_type === 'PayloadSourceNode' || n.component_type === 'PayloadSinkNode' ||
+                                       n.label.includes('Source') || n.label.includes('Sink');
+                  const isContextProcessor = n.component_type === 'ContextProcessorNode' ||
+                                              n.label.includes('Context') || n.label.includes('Rename') || n.label.includes('Delete');
+                  return !isSourceSink && !isContextProcessor;
+                })
                 .map(n => (
                 <div 
                   key={n.id} 
@@ -1247,6 +1253,7 @@
               </h4>
               {Object.values(nodeMap)
                 .filter(n => 
+                  n.component_type === 'ContextProcessorNode' ||
                   n.label.includes('Context') || 
                   n.label.includes('Rename') || 
                   n.label.includes('Delete')
@@ -1285,6 +1292,7 @@
               </h4>
               {Object.values(nodeMap)
                 .filter(n => 
+                  n.component_type === 'PayloadSourceNode' || n.component_type === 'PayloadSinkNode' ||
                   n.label.includes('Source') || 
                   n.label.includes('Sink')
                 )
