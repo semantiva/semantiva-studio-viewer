@@ -608,3 +608,209 @@
       font-weight: 600;
       color: var(--neutral-primary);
     }
+
+    /* Mobile Responsive Styles */
+    @media (max-width: 768px) {
+      /* Override the main container's inline flex styles */
+      #root > div {
+        flex-direction: column !important;
+        height: auto !important;
+        min-height: 100vh !important;
+      }
+      
+      #root { 
+        flex-direction: column;
+        height: auto;
+        min-height: 100vh;
+      }
+      
+      /* Force all children to be visible and properly ordered */
+      #root > div > * {
+        flex-shrink: 0 !important;
+      }
+      
+      #sidebar { 
+        width: 100% !important;
+        min-width: unset !important;
+        max-width: unset !important;
+        border-right: none;
+        border-bottom: 1px solid var(--neutral-border);
+        order: 1;
+        max-height: 200px;
+        overflow-y: auto;
+        transition: max-height 0.3s ease;
+      }
+      
+      /* Collapsed sidebar on mobile */
+      #sidebar.collapsed {
+        max-height: 50px !important;
+        overflow: hidden;
+      }
+      
+      /* Improve sidebar header on mobile */
+      #sidebar h3 {
+        writing-mode: horizontal-tb !important;
+        transform: none !important;
+        text-align: center;
+        padding: 10px;
+        margin: 0;
+        font-size: 16px;
+      }
+      
+      #graph { 
+        flex: none;
+        order: 2;
+        min-height: 400px;
+        overflow-x: auto;
+      }
+      
+      #details { 
+        width: 100% !important;
+        min-width: unset !important;
+        max-width: unset !important;
+        border-left: none;
+        border-top: 1px solid var(--neutral-border);
+        order: 3;
+        max-height: 400px;
+        overflow-y: auto;
+        display: block !important;
+        position: relative !important;
+        background: white;
+        min-height: 200px;
+        border-top: 3px solid var(--data-primary);
+        padding: 15px !important;
+        margin: 10px 0 !important;
+      }
+      
+      /* Hide resize handles on mobile */
+      .resize-handle {
+        display: none;
+      }
+      
+      /* Improve touch targets */
+      .node-item {
+        padding: 12px;
+        margin: 4px 2px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+      }
+      
+      .custom-node {
+        min-width: 200px;
+        padding: 12px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      
+      /* Make zoom controls more mobile-friendly */
+      .zoom-controls {
+        top: 10px;
+        right: 10px;
+      }
+      
+      .zoom-btn {
+        width: 44px;
+        height: 44px;
+        font-size: 20px;
+      }
+      
+      /* Improve readability */
+      .details-section {
+        margin: 12px 0;
+        padding: 12px;
+        font-size: 14px;
+      }
+      
+      .contract-item {
+        padding: 12px;
+        font-size: 14px;
+      }
+      
+      .trace-item {
+        font-size: 13px;
+        margin: 8px 0;
+      }
+      
+      /* Make the details panel more visible on mobile */
+      #details h4 {
+        font-size: 18px;
+        margin-bottom: 10px;
+        color: var(--type-primary);
+      }
+      
+      #details p {
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--neutral-primary);
+      }
+      
+      /* Ensure details content is visible */
+      #details > div {
+        min-height: 100px;
+        padding: 15px !important;
+      }
+      
+      /* Make parameter labels more readable */
+      .param-label {
+        font-size: 12px;
+        padding: 4px 8px;
+        min-height: 28px;
+        display: flex;
+        align-items: center;
+      }
+    }
+
+    /* Small mobile devices */
+    @media (max-width: 480px) {
+      #sidebar {
+        max-height: 150px;
+      }
+      
+      #details {
+        padding: 15px;
+        max-height: 40vh;
+        min-height: 120px !important;
+        background: white !important;
+        border-top: 2px solid var(--data-primary) !important;
+      }
+      
+      /* Ensure details content is visible on small screens */
+      #details > div {
+        padding: 12px !important;
+        min-height: 80px;
+      }
+      
+      #details h4 {
+        font-size: 16px;
+        color: var(--data-primary) !important;
+      }
+      
+      #details p {
+        font-size: 13px;
+      }
+      
+      .custom-graph {
+        min-width: 400px;
+      }
+      
+      .custom-node {
+        min-width: 160px;
+        padding: 10px;
+        font-size: 13px;
+      }
+      
+      .zoom-btn {
+        width: 40px;
+        height: 40px;
+        font-size: 18px;
+      }
+      
+      .details-section h3 {
+        font-size: 16px;
+      }
+      
+      .details-subheader {
+        font-size: 14px;
+      }
+    }

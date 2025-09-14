@@ -1,5 +1,8 @@
     const {useState, useEffect, useRef, useCallback} = React;
 
+    // Mobile detection utility
+    const isMobile = () => window.innerWidth <= 768;
+
     // Constants and Configuration
     const LAYOUT_CONFIG = {
       channelGap: 10,
@@ -905,6 +908,9 @@
       const [selectedNodeId, setSelectedNodeId] = useState(null);
       const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
+      // Mobile detection state
+      const [isMobileView, setIsMobileView] = useState(isMobile());
+
       // Trace overlay state
       const [traceAvailable, setTraceAvailable] = useState(false);
       const [traceMeta, setTraceMeta] = useState(null);
@@ -1054,6 +1060,13 @@
           });
       }, []);
 
+      // Mobile detection resize listener
+      useEffect(() => {
+        const handleResize = () => setIsMobileView(isMobile());
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+      }, []);
+
       // Function to load trace events for a specific node
       const loadNodeTraceEvents = useCallback((nodeId) => {
   if (!traceAvailable || !nodeMap) return;
@@ -1164,16 +1177,25 @@
       }
 
       return (
-        <div style={{display:'flex', height:'100%', width:'100%'}}>
+        <div style={{
+          display: 'flex', 
+          flexDirection: isMobileView ? 'column' : 'row',
+          height: isMobileView ? 'auto' : '100%', 
+          width: '100%',
+          minHeight: isMobileView ? '100vh' : 'auto'
+        }}>
           <div id="sidebar" style={{ 
-            width: sidebarCollapsed ? '40px' : `${sidebar.width}px`, 
+            width: isMobileView ? '100%' : (sidebarCollapsed ? '40px' : `${sidebar.width}px`), 
             overflow: 'hidden', 
             transition: sidebarCollapsed ? 'width 0.3s ease' : 'none',
-            borderRight: '1px solid #ccc',
+            borderRight: isMobileView ? 'none' : '1px solid #ccc',
+            borderBottom: isMobileView ? '1px solid #ccc' : 'none',
             padding: sidebarCollapsed ? '4px 0' : '4px',
-            position: 'relative'
-          }}>
-            {!sidebarCollapsed && (
+            position: 'relative',
+            maxHeight: isMobileView ? '200px' : 'auto',
+            order: isMobileView ? 1 : 'unset'
+          }} className={sidebarCollapsed ? 'collapsed' : ''}>
+            {!sidebarCollapsed && !isMobileView && (
               <div 
                 className={`resize-handle resize-handle-right ${sidebar.isResizing ? 'resizing' : ''}`}
                 onMouseDown={sidebar.handleMouseDown}
@@ -1185,11 +1207,13 @@
                 margin: '10px 5px', 
                 color: '#5856d6',
                 cursor: 'pointer',
-                writingMode: sidebarCollapsed ? 'vertical-rl' : 'horizontal-tb',
+                writingMode: (sidebarCollapsed && !isMobileView) ? 'vertical-rl' : 'horizontal-tb',
                 textAlign: 'center',
-                transform: sidebarCollapsed ? 'rotate(180deg)' : 'none',
+                transform: (sidebarCollapsed && !isMobileView) ? 'rotate(180deg)' : 'none',
                 whiteSpace: 'nowrap',
-                userSelect: 'none'
+                userSelect: 'none',
+                fontSize: isMobileView ? '16px' : 'inherit',
+                padding: isMobileView ? '10px' : '0'
               }}
             >
               Pipeline Node List
@@ -1317,7 +1341,12 @@
               </div>
             )}
           </div>
-          <div id="graph">
+          <div id="graph" style={{
+            flex: isMobileView ? 'none' : '1',
+            order: isMobileView ? 2 : 'unset',
+            minHeight: isMobileView ? '400px' : 'auto',
+            overflowX: isMobileView ? 'auto' : 'visible'
+          }}>
             <div style={{ padding: '10px', borderBottom: '1px solid #ddd', background: '#f8f9fa' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <h3 style={{ margin: '0', color: '#5856d6' }}>Semantiva Studio Lite - Dual-Channel Pipeline Inspection</h3>
@@ -1402,13 +1431,23 @@
             />
           </div>
           <div id="details" style={{ 
-            width: `${details.width}px`,
-            position: 'relative'
+            width: isMobileView ? '100%' : `${details.width}px`,
+            position: 'relative',
+            borderLeft: isMobileView ? 'none' : '1px solid #ccc',
+            borderTop: isMobileView ? '2px solid #007aff' : 'none',
+            order: isMobileView ? 3 : 'unset',
+            minHeight: isMobileView ? '200px' : 'auto',
+            maxHeight: isMobileView ? '400px' : 'auto',
+            overflowY: isMobileView ? 'auto' : 'visible',
+            background: isMobileView ? 'white' : 'transparent',
+            padding: isMobileView ? '15px' : '0'
           }}>
-            <div 
-              className={`resize-handle resize-handle-left ${details.isResizing ? 'resizing' : ''}`}
-              onMouseDown={details.handleMouseDown}
-            />
+            {!isMobileView && (
+              <div 
+                className={`resize-handle resize-handle-left ${details.isResizing ? 'resizing' : ''}`}
+                onMouseDown={details.handleMouseDown}
+              />
+            )}
             {nodeInfo ? (
               <div>
                 <div style={{ 
@@ -1734,20 +1773,20 @@
                 
                 {/* Errors Section */}
                 {nodeInfo.errors && nodeInfo.errors.length > 0 && (
-                  <div>
-                    <h4 style={{ color: '#dc3545', margin: '20px 0 10px 0', borderBottom: '1px solid #dc3545', paddingBottom: '5px' }}>
+                  <div className="details-section">
+                    <div className="details-subheader" style={{ color: '#dc3545', borderBottomColor: '#dc3545' }}>
                       Errors
-                    </h4>
+                    </div>
                     <div style={{
                       background: '#f8d7da', 
                       border: '1px solid #dc3545',
-                      borderRadius: '4px',
-                      padding: '10px'
+                      borderRadius: '6px',
+                      padding: '12px'
                     }}>
                       {nodeInfo.errors.map((error, index) => (
                         <div key={index} style={{
                           color: '#721c24',
-                          fontSize: '13px',
+                          fontSize: '14px',
                           marginBottom: index < nodeInfo.errors.length - 1 ? '8px' : '0',
                           lineHeight: '1.4'
                         }}>

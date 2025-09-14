@@ -471,3 +471,212 @@ body, html {
       margin-left: 20px;
       padding-left: 20px;
     }
+
+    /* Mobile Responsive Styles */
+    @media (max-width: 768px) {
+      /* Override the main container's inline flex styles */
+      #root > div {
+        flex-direction: column !important;
+        height: auto !important;
+        min-height: 100vh !important;
+      }
+      
+      #root { 
+        flex-direction: column;
+        height: auto;
+        min-height: 100vh;
+      }
+      
+      /* Force all children to be visible and properly ordered */
+      #root > div > * {
+        flex-shrink: 0 !important;
+      }
+      
+      #sidebar { 
+        width: 100% !important;
+        min-width: unset !important;
+        max-width: unset !important;
+        border-right: none;
+        border-bottom: 1px solid var(--neutral-border);
+        order: 1;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      
+      #graph { 
+        flex: none;
+        order: 2;
+        min-height: 400px;
+        overflow-x: auto;
+      }
+      
+      #details { 
+        width: 100% !important;
+        min-width: unset !important;
+        max-width: unset !important;
+        border-left: none;
+        border-top: 1px solid var(--neutral-border);
+        order: 3;
+        max-height: 400px;
+        overflow-y: auto;
+        display: block !important;
+        position: relative !important;
+        background: white;
+        min-height: 200px;
+        border-top: 3px solid var(--data-primary);
+        padding: 15px !important;
+        margin: 10px 0 !important;
+      }
+      
+      /* Hide resize handles on mobile */
+      .resize-handle {
+        display: none;
+      }
+      
+      /* Improve header layout */
+      .graph-header {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 12px 15px;
+      }
+      
+      .graph-header-content {
+        margin-bottom: 10px;
+      }
+      
+      .header-controls {
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      
+      /* Improve touch targets */
+      .node-item {
+        padding: 12px 15px;
+        margin: 2px 0;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+      }
+      
+      .tree-node-item {
+        min-width: 200px;
+        padding: 15px;
+        font-size: 14px;
+        margin: 8px 0;
+      }
+      
+      /* Make component groups more mobile-friendly */
+      .component-group h4 {
+        padding: 15px;
+        font-size: 15px;
+      }
+      
+      .checkbox-container {
+        padding: 10px 15px;
+        font-size: 14px;
+        min-height: 44px;
+      }
+      
+      /* Improve readability */
+      .details-section {
+        margin: 12px 0;
+        padding: 12px;
+        font-size: 14px;
+      }
+      
+      .contract-item {
+        padding: 12px;
+        font-size: 14px;
+      }
+      
+      .trace-item {
+        font-size: 13px;
+        margin: 8px 0;
+      }
+      
+      /* Make the details panel more visible on mobile */
+      #details h3 {
+        font-size: 18px;
+        margin-bottom: 10px;
+        color: var(--type-primary);
+      }
+      
+      #details p {
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--neutral-primary);
+      }
+      
+      /* Ensure details content is visible */
+      #details > div {
+        min-height: 100px;
+        padding: 15px !important;
+      }
+      
+      /* Tree structure improvements */
+      .tree-container {
+        padding: 15px;
+      }
+      
+      .tree-connector {
+        margin-left: 15px;
+        padding-left: 15px;
+      }
+    }
+
+    /* Small mobile devices */
+    @media (max-width: 480px) {
+      #sidebar {
+        max-height: 150px;
+      }
+      
+      #details {
+        padding: 12px;
+        max-height: 40vh;
+        min-height: 120px !important;
+        background: white !important;
+        border-top: 2px solid var(--data-primary) !important;
+      }
+      
+      /* Ensure details content is visible on small screens */
+      #details > div {
+        padding: 12px !important;
+        min-height: 80px;
+      }
+      
+      #details h3 {
+        font-size: 16px;
+        color: var(--data-primary) !important;
+      }
+      
+      #details p {
+        font-size: 13px;
+      }
+      
+      .graph-header {
+        padding: 10px 12px;
+      }
+      
+      .tree-node-item {
+        min-width: 160px;
+        padding: 12px;
+        font-size: 13px;
+      }
+      
+      .component-group h4 {
+        padding: 12px;
+        font-size: 14px;
+      }
+      
+      .details-section h3 {
+        font-size: 16px;
+      }
+      
+      .details-subheader {
+        font-size: 14px;
+      }
+      
+      .tree-container {
+        padding: 12px;
+      }
+    }

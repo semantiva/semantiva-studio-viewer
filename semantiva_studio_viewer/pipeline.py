@@ -338,6 +338,11 @@ def serve_pipeline(
     if not host or not isinstance(host, str):
         raise ValueError("Host must be a non-empty string")
 
+    # Initialize core Semantiva components before loading configuration
+    # This ensures that built-in processors like FloatMultiplyOperation are registered
+    from semantiva.registry.class_registry import ClassRegistry
+    ClassRegistry.initialize_default_modules()
+
     try:
         # Load the pipeline configuration (doesn't create Pipeline object)
         config = load_pipeline_from_yaml(yaml_path)
@@ -446,6 +451,11 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
     # Check if we can write to the output location
     if output_file.exists() and not output_file.is_file():
         raise ValueError(f"Output path exists but is not a file: {output_path}")
+
+    # Initialize core Semantiva components before loading configuration
+    # This ensures that built-in processors are available during export
+    from semantiva.registry.class_registry import ClassRegistry
+    ClassRegistry.initialize_default_modules()
 
     try:
         config = load_pipeline_from_yaml(yaml_path)

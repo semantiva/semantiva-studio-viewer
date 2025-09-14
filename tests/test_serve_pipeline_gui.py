@@ -165,6 +165,7 @@ def test_pipeline_json_includes_context_params(test_pipeline):
     delete_node = next(n for n in pipeline_json["nodes"] if "Delete" in n["label"])
     assert rename_node["contextParams"] == ["factor"]
     assert delete_node["contextParams"] == ["renamed_key"]
+    assert delete_node["suppressed_keys"] == ["renamed_key"]
 
 
 def test_pipeline_json_node_ids_start_from_one(test_pipeline):
