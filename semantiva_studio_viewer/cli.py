@@ -63,7 +63,9 @@ def main() -> None:
         "--port", type=int, default=8000, help="Port number (default: 8000)"
     )
     serve_pipeline_parser.add_argument(
-        "--trace-jsonl", help="Path to trace JSONL file", default=None
+        "--trace-jsonl", 
+        help="Path to SER (Step Evidence Record) or legacy trace JSONL file", 
+        default=None
     )
     serve_pipeline_parser.set_defaults(func=serve_pipeline_command)
 
@@ -90,7 +92,9 @@ def main() -> None:
     )
     export_pipeline_parser.add_argument("output", help="Output HTML file path")
     export_pipeline_parser.add_argument(
-        "--trace-jsonl", help="Path to trace JSONL file", default=None
+        "--trace-jsonl", 
+        help="Path to SER (Step Evidence Record) or legacy trace JSONL file", 
+        default=None
     )
     export_pipeline_parser.set_defaults(func=export_pipeline_command)
 

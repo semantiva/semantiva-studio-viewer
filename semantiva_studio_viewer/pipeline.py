@@ -33,6 +33,35 @@ from semantiva.inspection import (
 app = FastAPI()
 
 
+def _detect_ser_file(file_path: str) -> bool:
+    """Detect if a JSONL file contains SER records.
+    
+    Args:
+        file_path: Path to the JSONL file
+        
+    Returns:
+        True if any line contains type: "ser", False otherwise
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            # Check first 10 lines for SER records
+            for i, line in enumerate(f):
+                if i >= 10:  # Don't check too many lines
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    if record.get("type") == "ser":
+                        return True
+                except json.JSONDecodeError:
+                    continue
+        return False
+    except Exception:
+        return False
+
+
 def _ensure_trace_loaded():
     """Try to lazily load trace file if app.state.trace_index is not present and a path was provided."""
     if hasattr(app.state, "trace_index") and app.state.trace_index:
@@ -41,12 +70,19 @@ def _ensure_trace_loaded():
     if not trace_path:
         return
     try:
-        from .trace_index import TraceIndex
-
         trace_file = Path(trace_path)
         if trace_file.exists() and trace_file.is_file():
-            app.state.trace_index = TraceIndex.from_jsonl(trace_path)
-            print(f"Lazy-loaded trace file: {trace_path}")
+            # Auto-detect file format by checking for SER records
+            is_ser_file = _detect_ser_file(trace_path)
+            
+            if is_ser_file:
+                from .ser_index import SERIndex
+                app.state.trace_index = SERIndex.from_jsonl(trace_path)
+                print(f"Lazy-loaded SER file: {trace_path}")
+            else:
+                from .trace_index import TraceIndex
+                app.state.trace_index = TraceIndex.from_jsonl(trace_path)
+                print(f"Lazy-loaded legacy trace file: {trace_path}")
     except Exception as e:
         print(f"Warning: Failed to lazy-load trace file {trace_path}: {e}")
         app.state.trace_index = None
@@ -357,21 +393,31 @@ def serve_pipeline(
     # Initialize trace index if trace file is provided
     if trace_jsonl:
         try:
-            from .trace_index import TraceIndex
-
             trace_file = Path(trace_jsonl)
             if not trace_file.exists():
                 print(f"Warning: Trace file not found: {trace_jsonl}")
             elif not trace_file.is_file():
                 print(f"Warning: Trace path is not a file: {trace_jsonl}")
             else:
-                print(f"Loading trace file: {trace_jsonl}")
-                app.state.trace_index = TraceIndex.from_jsonl(trace_jsonl)
-                print(
-                    f"Trace loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)"
-                )
+                # Auto-detect file format
+                is_ser_file = _detect_ser_file(trace_jsonl)
+                
+                if is_ser_file:
+                    print(f"Loading SER file: {trace_jsonl}")
+                    from .ser_index import SERIndex
+                    app.state.trace_index = SERIndex.from_jsonl(trace_jsonl)
+                    print(
+                        f"SER data loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)"
+                    )
+                else:
+                    print(f"Loading legacy trace file: {trace_jsonl}")
+                    from .trace_index import TraceIndex
+                    app.state.trace_index = TraceIndex.from_jsonl(trace_jsonl)
+                    print(
+                        f"Trace loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)"
+                    )
         except ImportError:
-            print("Warning: TraceIndex not available, trace file will be ignored")
+            print("Warning: Trace indexing not available, trace file will be ignored")
         except Exception as e:
             print(f"Warning: Failed to load trace file: {e}")
             print("Continuing without trace overlay")
@@ -466,9 +512,17 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
     trace_data = {}
     if trace_jsonl:
         try:
-            from .trace_index import TraceIndex
-
-            trace_index = TraceIndex.from_jsonl(trace_jsonl)
+            # Auto-detect file format
+            is_ser_file = _detect_ser_file(trace_jsonl)
+            
+            if is_ser_file:
+                print(f"Loading SER file for export: {trace_jsonl}")
+                from .ser_index import SERIndex
+                trace_index = SERIndex.from_jsonl(trace_jsonl)
+            else:
+                print(f"Loading legacy trace file for export: {trace_jsonl}")
+                from .trace_index import TraceIndex
+                trace_index = TraceIndex.from_jsonl(trace_jsonl)
 
             # Build trace data for injection
             trace_meta = trace_index.get_meta()
@@ -513,8 +567,9 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
                 events_response = trace_index.node_events(uuid, offset=0, limit=100)
                 trace_data["node_events"][uuid] = events_response
 
+            data_source = "SER" if is_ser_file else "legacy trace"
             print(
-                f"Trace data loaded: {trace_meta['run_id']} ({len(label_to_uuid)} nodes mapped)"
+                f"Trace data loaded from {data_source}: {trace_meta['run_id']} ({len(label_to_uuid)} nodes mapped)"
             )
 
         except Exception as e:

@@ -49,17 +49,30 @@ Features:
 
 ### Adding execution traces
 
-Overlay a JSONL trace (from a previous run):
+Overlay execution data from **SER (Step Evidence Record)** or legacy JSONL traces:
 
 ```bash
 semantiva-studio-viewer serve-pipeline semantiva-imaging-pipeline.yaml \
-  --trace-jsonl traces/20250823_run.jsonl
+  --trace-jsonl traces/execution.ser.jsonl
 ```
+
+**SER v1.1+ support** (recommended):
+* Full execution evidence: checks, IO deltas, summaries, timing
+* Pre/post-execution validation results
+* Policy compliance indicators  
+* Created/updated/read keys tracking
+* Rich data type summaries with hashes
+
+**Legacy trace support** (deprecated):
+* Basic before/after/error events
+* Timing and hash summaries
+* Backward compatibility for older runs
 
 Trace overlay adds:
 
 * Per-node execution summaries (phases, timings, counts).
-* Deterministic node↔UUID binding (via **positional identity** in canonical spec).
+* SER-specific features: checks badges, IO delta summaries, policy results
+* Deterministic node↔UUID binding (via **positional identity** or SER labels).
 * Per-node event APIs: `/api/trace/node/<uuid>?offset=&limit=`
 * Trace metadata at `/api/trace/meta` and aggregated stats at `/api/trace/summary`.
 
@@ -67,7 +80,7 @@ You can also **export HTML with traces pre-baked**:
 
 ```bash
 semantiva-studio-viewer export-pipeline semantiva-imaging-pipeline.yaml \
-  pipeline_with_trace.html --trace-jsonl traces/run.jsonl
+  pipeline_with_trace.html --trace-jsonl traces/execution.ser.jsonl
 ```
 
 ---
@@ -95,7 +108,9 @@ semantiva-studio-viewer export-components semantiva_components.ttl components.ht
 ## Notes
 
 * The inspector tolerates partially invalid configs to aid debugging.
-* When traces are present, **node→UUID mapping is positional** (from `canonical_spec`); label/FQN fallbacks are used only if necessary.
+* **SER v0 (draft) format** is used for execution traces in the current version.
+* When traces are present, **node→UUID mapping uses SER labels** first, then **positional identity** (from `canonical_spec`); FQN fallbacks are used only if necessary.
+* **SER-only mode**: If only SER data is available (no pipeline config), Studio can reconstruct basic graph topology from SER `upstream` relationships.
 
 ---
 

@@ -1597,7 +1597,7 @@
                             <strong>Requires:</strong> {nodeInfo.required_keys.join(', ')}
                           </div>
                         )}
-                        {hasCreatedKeys && (
+                        {(!traceAvailable) && hasCreatedKeys && (
                           <div className="trace-item">
                             <strong>Produces:</strong> {nodeInfo.created_keys.join(', ')}
                           </div>
@@ -1691,15 +1691,18 @@
                         <strong>Execution status:</strong> {status}
                       </div>
 
-                      {/* Execution timing (after only) */}
+                      {/* Execution timing (after only) - separate Wall and CPU time lines */}
                       {bucket.after && bucket.after.t_wall !== undefined && bucket.after.t_wall !== null && (
                         <div className="trace-item">
-                          <strong>Wall Time:</strong> {Number(bucket.after.t_wall).toFixed(6).replace(/\.0+$/,'')}s
+                          <strong>Wall Time:</strong>
+                          <span style={{ marginLeft: '8px', fontFamily: 'monospace' }}>{Number(bucket.after.t_wall).toFixed(6).replace(/\.0+$/,'')}s</span>
                         </div>
                       )}
+
                       {bucket.after && bucket.after.t_cpu !== undefined && bucket.after.t_cpu !== null && (
                         <div className="trace-item">
-                          <strong>CPU Time:</strong> {Number(bucket.after.t_cpu).toFixed(6).replace(/\.0+$/,'')}s
+                          <strong>CPU Time:</strong>
+                          <span style={{ marginLeft: '8px', fontFamily: 'monospace' }}>{Number(bucket.after.t_cpu).toFixed(6).replace(/\.0+$/,'')}s</span>
                         </div>
                       )}
 
@@ -1767,6 +1770,223 @@
                           <div className="trace-item">Node execution has started but no completion or error event recorded yet.</div>
                         </div>
                       )}
+
+                      {/* SER-specific sections */}
+                      {(function() {
+                        // Check if we have SER data (raw event with checks, io_delta, etc.)
+                        const serEvent = bucket.after || bucket.error || bucket.before;
+                        const rawData = serEvent && serEvent._raw;
+                        if (!rawData || rawData.type !== 'ser') return null;
+
+                        return (
+                          <div>
+                            {/* SER Checks */}
+                            {rawData.checks && (
+                              <div style={{ marginTop: '12px' }}>
+                                <div className="trace-item"><strong>SER Checks:</strong></div>
+                                
+                                {/* Pre-execution checks */}
+                                {rawData.checks.why_run && rawData.checks.why_run.pre && rawData.checks.why_run.pre.length > 0 && (
+                                  <div style={{ marginLeft: '12px', marginTop: '4px' }}>
+                                    <div style={{ fontSize: '13px', fontWeight: '500' }}>Pre-execution:</div>
+                                    {rawData.checks.why_run.pre.map((check, idx) => (
+                                      <div key={`pre-${idx}`} style={{ 
+                                        display: 'inline-block', 
+                                        margin: '2px 4px', 
+                                        padding: '2px 6px', 
+                                        borderRadius: '3px',
+                                        fontSize: '11px',
+                                        backgroundColor: check.result === 'PASS' ? '#d4edda' : check.result === 'FAIL' ? '#f8d7da' : '#fff3cd',
+                                        border: `1px solid ${check.result === 'PASS' ? '#28a745' : check.result === 'FAIL' ? '#dc3545' : '#ffc107'}`,
+                                        color: check.result === 'PASS' ? '#155724' : check.result === 'FAIL' ? '#721c24' : '#856404'
+                                      }}>
+                                        {check.code}: {check.result}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Policy checks */}
+                                {rawData.checks.why_run && rawData.checks.why_run.policy && rawData.checks.why_run.policy.length > 0 && (
+                                  <div style={{ marginLeft: '12px', marginTop: '4px' }}>
+                                    <div style={{ fontSize: '13px', fontWeight: '500' }}>Policy:</div>
+                                    {rawData.checks.why_run.policy.map((check, idx) => (
+                                      <div key={`policy-${idx}`} style={{ 
+                                        display: 'inline-block', 
+                                        margin: '2px 4px', 
+                                        padding: '2px 6px', 
+                                        borderRadius: '3px',
+                                        fontSize: '11px',
+                                        backgroundColor: check.result === 'PASS' ? '#d4edda' : check.result === 'FAIL' ? '#f8d7da' : '#fff3cd',
+                                        border: `1px solid ${check.result === 'PASS' ? '#28a745' : check.result === 'FAIL' ? '#dc3545' : '#ffc107'}`,
+                                        color: check.result === 'PASS' ? '#155724' : check.result === 'FAIL' ? '#721c24' : '#856404'
+                                      }}>
+                                        {check.rule}: {check.result}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Post-execution checks */}
+                                {rawData.checks.why_ok && rawData.checks.why_ok.post && rawData.checks.why_ok.post.length > 0 && (
+                                  <div style={{ marginLeft: '12px', marginTop: '4px' }}>
+                                    <div style={{ fontSize: '13px', fontWeight: '500' }}>Post-execution:</div>
+                                    {rawData.checks.why_ok.post.map((check, idx) => (
+                                      <div key={`post-${idx}`} style={{ 
+                                        display: 'inline-block', 
+                                        margin: '2px 4px', 
+                                        padding: '2px 6px', 
+                                        borderRadius: '3px',
+                                        fontSize: '11px',
+                                        backgroundColor: check.result === 'PASS' ? '#d4edda' : check.result === 'FAIL' ? '#f8d7da' : '#fff3cd',
+                                        border: `1px solid ${check.result === 'PASS' ? '#28a745' : check.result === 'FAIL' ? '#dc3545' : '#ffc107'}`,
+                                        color: check.result === 'PASS' ? '#155724' : check.result === 'FAIL' ? '#721c24' : '#856404'
+                                      }}>
+                                        {check.code}: {check.result}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Invariant checks */}
+                                {rawData.checks.why_ok && rawData.checks.why_ok.invariants && rawData.checks.why_ok.invariants.length > 0 && (
+                                  <div style={{ marginLeft: '12px', marginTop: '4px' }}>
+                                    <div style={{ fontSize: '13px', fontWeight: '500' }}>Invariants:</div>
+                                    {rawData.checks.why_ok.invariants.map((check, idx) => (
+                                      <div key={`inv-${idx}`} style={{ 
+                                        display: 'inline-block', 
+                                        margin: '2px 4px', 
+                                        padding: '2px 6px', 
+                                        borderRadius: '3px',
+                                        fontSize: '11px',
+                                        backgroundColor: check.result === 'PASS' ? '#d4edda' : check.result === 'FAIL' ? '#f8d7da' : '#fff3cd',
+                                        border: `1px solid ${check.result === 'PASS' ? '#28a745' : check.result === 'FAIL' ? '#dc3545' : '#ffc107'}`,
+                                        color: check.result === 'PASS' ? '#155724' : check.result === 'FAIL' ? '#721c24' : '#856404'
+                                      }}>
+                                        {check.code}: {check.result}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                                {/* IO Delta */}
+                            {rawData.io_delta && (
+                              <div style={{ marginTop: '12px' }}>
+                                {(rawData.io_delta.created && rawData.io_delta.created.length > 0) && (
+                                  <div style={{ marginTop: '6px' }}>
+                                    <div className="trace-item"><strong>Created Keys:</strong></div>
+                                    <div style={{ marginLeft: '12px', marginTop: '6px' }}>
+                                      {rawData.io_delta.created.map((k) => {
+                                        // Prefer repr from io_delta.summaries, fallback to rawData.summaries
+                                        const summary = (rawData.io_delta.summaries && rawData.io_delta.summaries[k]) || (rawData.summaries && rawData.summaries[k]) || {};
+                                        const repr = summary && summary.repr ? summary.repr : '';
+                                        return (
+                                          <div key={`created-${k}`} style={{ marginBottom: '6px' }}>
+                                            <strong style={{ marginRight: '8px' }}>{k}</strong>
+                                            <span style={{ fontFamily: 'monospace', color: '#333' }} title={repr}>{formatRepr(String(repr || ''))}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                                {(rawData.io_delta.updated && rawData.io_delta.updated.length > 0) && (
+                                  <div className="trace-item">
+                                    <strong>Updated Keys:</strong> {rawData.io_delta.updated.join(', ')}
+                                  </div>
+                                )}
+                                {(rawData.io_delta.read && rawData.io_delta.read.length > 0) && (
+                                  <div className="trace-item">
+                                    <strong>Read Keys:</strong> {rawData.io_delta.read.join(', ')}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Parameter provenance (SER action.params + action.param_source) */}
+                            {rawData.action && rawData.action.params && Object.keys(rawData.action.params).length > 0 && (
+                              <div style={{ marginTop: '12px' }}>
+                                <div className="trace-item"><strong>Parameter provenance:</strong></div>
+                                <div style={{ marginLeft: '12px', marginTop: '6px' }}>
+                                  {Object.entries(rawData.action.params).map(([pname, pval]) => {
+                                    // Try to pick a readable repr for the value
+                                    let valRepr = '';
+                                    if (pval && typeof pval === 'object') {
+                                      if (pval.repr) valRepr = pval.repr;
+                                      else valRepr = JSON.stringify(pval);
+                                    } else if (typeof pval === 'string') {
+                                      valRepr = pval;
+                                    } else {
+                                      try { valRepr = String(pval); } catch (e) { valRepr = ''; }
+                                    }
+
+                                    // Lookup parameter provenance information
+                                    let psource = null;
+                                    if (rawData.action.param_source && typeof rawData.action.param_source === 'object') {
+                                      psource = rawData.action.param_source[pname] || rawData.action.param_source[pname.toString()];
+                                    }
+
+                                    // Build a human readable source string
+                                    let sourceText = '';
+                                    if (!psource) {
+                                      sourceText = 'unknown';
+                                    } else if (typeof psource === 'string') {
+                                      sourceText = psource;
+                                    } else if (psource && typeof psource === 'object') {
+                                      // Prefer common fields
+                                      if (psource.from) sourceText = psource.from;
+                                      else if (psource.source) sourceText = psource.source;
+                                      else if (psource.type) sourceText = psource.type;
+                                      else sourceText = JSON.stringify(psource);
+                                    } else {
+                                      sourceText = String(psource);
+                                    }
+
+                                    return (
+                                      <div key={`param-${pname}`} style={{ marginBottom: '8px' }}>
+                                        <div>
+                                          <strong style={{ marginRight: '8px' }}>{pname}</strong>
+                                          <span style={{ fontFamily: 'monospace', color: '#333' }} title={valRepr}>{formatRepr(String(valRepr || ''))}</span>
+                                        </div>
+                                        <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                                          <em>Source:</em>&nbsp;{sourceText}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Data summaries from SER */}
+                            {rawData.summaries && Object.keys(rawData.summaries).length > 0 && (
+                              <div style={{ marginTop: '12px' }}>
+                                <div className="trace-item"><strong>Data Summaries:</strong></div>
+                                {Object.entries(rawData.summaries).map(([key, summary]) => (
+                                  <div key={key} style={{ marginLeft: '12px', marginTop: '4px' }}>
+                                    <div style={{ fontSize: '13px', fontWeight: '500' }}>{key}:</div>
+                                    <div style={{ marginLeft: '12px', fontSize: '12px', color: '#666' }}>
+                                      {summary.dtype && <span>Type: {summary.dtype}</span>}
+                                      {summary.rows && <span style={{ marginLeft: '12px' }}>Rows: {summary.rows}</span>}
+                                      {summary.sha256 && (
+                                        <div style={{ marginTop: '2px' }}>
+                                          <span>Hash: </span>
+                                          <span style={{ fontFamily: 'monospace' }} title={summary.sha256}>
+                                            {truncateHash(summary.sha256)}
+                                          </span>
+                                          <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(summary.sha256)} style={{ marginLeft: '6px', fontSize: '10px' }}>Copy</button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })()}
