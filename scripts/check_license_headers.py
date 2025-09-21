@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 # Copyright 2025 Semantiva authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,17 +15,45 @@
 """Verify that all project files contain the license header and summarize failures."""
 
 import os
-import sys
-from pathlib import Path
 
-# Ensure the repository root is first on sys.path so we import the local
-# `scripts` package (scripts/__init__.py) rather than any installed package
-# named `scripts` from the environment.
-repo_root = Path(__file__).resolve().parent.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+import re
+from typing import Iterable
 
-from scripts import HEADER_PATTERN, INCLUDE_DIRS, EXTENSIONS
+HEADER = """# Copyright 2025 Semantiva authors
+#
+# Licensed under the Apache License, Version 2.0 (the \"License\");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an \"AS IS\" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""
+
+HEADER_PATTERN = re.compile(
+    r"""^# Copyright 2025 Semantiva authors
+#
+# Licensed under the Apache License, Version 2\.0 \(the \"License\"\);
+# you may not use this file except in compliance with the License\.
+# You may obtain a copy of the License at
+#
+#     http://www\.apache\.org/licenses/LICENSE-2\.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an \"AS IS\" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied\.
+# See the License for the specific language governing permissions and
+# limitations under the License\.
+""",
+    re.MULTILINE,
+)
+
+INCLUDE_DIRS: Iterable[str] = ["semantiva_studio_viewer", "tests", "scripts"]
+EXTENSIONS = [".py"]
 
 
 def has_header(filepath: str) -> bool:

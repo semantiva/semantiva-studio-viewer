@@ -25,7 +25,7 @@ from .trace_index import TraceEvent, TraceAgg
 
 class SERIndex:
     """In-memory index of SER records for fast querying.
-    
+
     Provides same API as TraceIndex to maintain compatibility with existing Studio code.
     """
 
@@ -96,7 +96,7 @@ class SERIndex:
                     line = raw_line.strip()
                     if not line:
                         continue
-                    
+
                     try:
                         record = json.loads(line)
                         index.total_events += 1
@@ -113,7 +113,9 @@ class SERIndex:
                     except json.JSONDecodeError as e:
                         index.warnings.append(f"Line {line_num}: Invalid JSON - {e}")
                     except Exception as e:
-                        index.warnings.append(f"Line {line_num}: Processing error - {e}")
+                        index.warnings.append(
+                            f"Line {line_num}: Processing error - {e}"
+                        )
 
         except Exception as e:
             raise ValueError(f"Failed to read SER file: {e}")
@@ -160,7 +162,9 @@ class SERIndex:
         if "summary" in record:
             self.meta["end_summary"] = record["summary"]
 
-    def _process_ser_record(self, record: Dict[str, Any], max_events_per_node: int) -> None:
+    def _process_ser_record(
+        self, record: Dict[str, Any], max_events_per_node: int
+    ) -> None:
         """Process SER record and synthesize trace events."""
         try:
             ids = record.get("ids", {})
@@ -191,15 +195,23 @@ class SERIndex:
 
             # Store canonical node info with labels, preserving existing data if available
             existing_canonical = self.canonical_nodes.get(node_id, {})
-            
+
             # Preserve declaration_index and declaration_subindex from pipeline_start if available
             preserved_di = existing_canonical.get("declaration_index")
             preserved_dsub = existing_canonical.get("declaration_subindex", 0)
-            
+
             # Only use labels data if we don't have preserved values
-            final_di = preserved_di if preserved_di is not None else labels.get("declaration_index")
-            final_dsub = preserved_dsub if preserved_dsub is not None else labels.get("declaration_subindex", 0)
-            
+            final_di = (
+                preserved_di
+                if preserved_di is not None
+                else labels.get("declaration_index")
+            )
+            final_dsub = (
+                preserved_dsub
+                if preserved_dsub is not None
+                else labels.get("declaration_subindex", 0)
+            )
+
             self.canonical_nodes[node_id] = {
                 "node_uuid": node_id,
                 "fqn": node_fqn,
@@ -231,7 +243,7 @@ class SERIndex:
             agg = self.per_node[node_id]
             timing = record.get("timing", {})
             status = record.get("status", "completed")
-            
+
             # Extract timing info
             start_time = timing.get("start", "")
             end_time = timing.get("end", "")
@@ -240,24 +252,26 @@ class SERIndex:
 
             # Synthesize "before" event
             before_event = TraceEvent(
-                phase="before",
-                event_time_utc=start_time,
-                _raw=record
+                phase="before", event_time_utc=start_time, _raw=record
             )
             self._add_event(node_id, before_event, max_events_per_node)
             agg.count_before += 1
 
-        # Synthesize "after" or "error" event
+            # Synthesize "after" or "error" event
             if status == "error":
                 error_info = record.get("error", {})
                 error_event = TraceEvent(
                     phase="error",
                     event_time_utc=end_time,
                     t_wall=t_wall,
-            t_cpu=(timing.get("cpu_ms") / 1000.0) if timing.get("cpu_ms") is not None else None,
+                    t_cpu=(
+                        (timing.get("cpu_ms") / 1000.0)
+                        if timing.get("cpu_ms") is not None
+                        else None
+                    ),
                     error_type=error_info.get("type", "Error"),
                     error_msg=error_info.get("message", ""),
-                    _raw=record
+                    _raw=record,
                 )
                 self._add_event(node_id, error_event, max_events_per_node)
                 agg.count_error += 1
@@ -267,14 +281,20 @@ class SERIndex:
                 # Synthesize output data hash and repr from summaries
                 summaries = record.get("summaries", {})
                 io_delta = record.get("io_delta", {})
-                
-                out_data_hash = self._extract_data_hash(summaries, io_delta, "output_data", "created")
+
+                out_data_hash = self._extract_data_hash(
+                    summaries, io_delta, "output_data", "created"
+                )
                 out_data_repr = self._extract_data_repr(summaries, "output_data")
                 post_context_hash = self._extract_context_hash(summaries)
                 post_context_repr = self._extract_context_repr(summaries)
 
                 # Extract CPU time (ms -> seconds) when available
-                t_cpu = (timing.get("cpu_ms") / 1000.0) if timing.get("cpu_ms") is not None else None
+                t_cpu = (
+                    (timing.get("cpu_ms") / 1000.0)
+                    if timing.get("cpu_ms") is not None
+                    else None
+                )
 
                 after_event = TraceEvent(
                     phase="after",
@@ -285,7 +305,7 @@ class SERIndex:
                     out_data_repr=out_data_repr,
                     post_context_hash=post_context_hash,
                     post_context_repr=post_context_repr,
-                    _raw=record
+                    _raw=record,
                 )
                 self._add_event(node_id, after_event, max_events_per_node)
                 agg.count_after += 1
@@ -299,14 +319,18 @@ class SERIndex:
         except Exception as e:
             self.warnings.append(f"Error processing SER record: {e}")
 
-    def _add_event(self, node_id: str, event: TraceEvent, max_events_per_node: int) -> None:
+    def _add_event(
+        self, node_id: str, event: TraceEvent, max_events_per_node: int
+    ) -> None:
         """Add event to node with size limit."""
         events_list = self.events_by_node[node_id]
         if len(events_list) >= max_events_per_node:
             events_list.pop(0)  # Remove oldest
         events_list.append(event)
 
-    def _extract_data_hash(self, summaries: Dict, io_delta: Dict, summary_key: str, delta_key: str) -> Optional[str]:
+    def _extract_data_hash(
+        self, summaries: Dict, io_delta: Dict, summary_key: str, delta_key: str
+    ) -> Optional[str]:
         """Extract data hash from summaries or compute from created keys."""
         # Try direct summary
         if summary_key in summaries:
@@ -390,7 +414,7 @@ class SERIndex:
 
         # All nodes were already collected during SER processing
         # Edges were already collected as well
-        
+
         # Update meta to indicate SER-only mode
         self.meta["ser_mode"] = True
         self.meta["graph_source"] = "ser_topology"
@@ -500,3 +524,206 @@ class SERIndex:
             "nodes": list(self._nodes_by_id.values()),
             "edges": self._edges,
         }
+
+
+@dataclass
+class RunMeta:
+    """Metadata for a single run in a multi-run SER file."""
+
+    run_id: str
+    pipeline_id: Optional[str]
+    started_at: Optional[str]
+    ended_at: Optional[str]
+    total_events: int = 0
+
+
+class MultiSERIndex:
+    """Holds one SERIndex per run_id and routes queries by ?run= param."""
+
+    def __init__(self) -> None:
+        self.by_run: Dict[str, SERIndex] = {}
+        self.meta_by_run: Dict[str, RunMeta] = {}
+        self.file_path: Optional[str] = None
+        self.file_size: int = 0
+        self._default_run: Optional[str] = None
+
+    @classmethod
+    def from_json_or_jsonl(cls, path: str) -> "MultiSERIndex":
+        """Create MultiSERIndex from JSON/JSONL file containing multiple SER runs.
+
+        Args:
+            path: Path to SER JSON/JSONL file
+
+        Returns:
+            MultiSERIndex instance with parsed data grouped by run_id
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            ValueError: If file format is invalid
+        """
+        p = Path(path)
+        if not p.exists() or not p.is_file():
+            raise FileNotFoundError(f"SER file not found: {path}")
+
+        inst = cls()
+        inst.file_path = str(p.absolute())
+        inst.file_size = p.stat().st_size
+
+        def _get_or_make(run_id: str) -> SERIndex:
+            if run_id not in inst.by_run:
+                inst.by_run[run_id] = SERIndex()
+                inst.meta_by_run[run_id] = RunMeta(
+                    run_id=run_id,
+                    pipeline_id=None,
+                    started_at=None,
+                    ended_at=None,
+                    total_events=0,
+                )
+                if inst._default_run is None:
+                    inst._default_run = run_id
+            return inst.by_run[run_id]
+
+        def _touch_meta(run_id: str, record: Dict[str, Any]) -> None:
+            meta = inst.meta_by_run[run_id]
+            # pipeline_id
+            pid = (record.get("ids") or {}).get("pipeline_id") or record.get(
+                "pipeline_id"
+            )
+            if pid and not meta.pipeline_id:
+                meta.pipeline_id = pid
+            # started_at / ended_at from timing if present
+            timing = record.get("timing") or {}
+            st = timing.get("start")
+            en = timing.get("end")
+            if st and (not meta.started_at or st < meta.started_at):
+                meta.started_at = st
+            if en and (not meta.ended_at or en > meta.ended_at):
+                meta.ended_at = en
+            meta.total_events += 1
+
+        def _route_record(index: SERIndex, record: Dict[str, Any]) -> None:
+            rtype = record.get("type")
+            if rtype == "ser":
+                index._process_ser_record(record, max_events_per_node=500)
+            elif rtype == "pipeline_start":
+                index._process_pipeline_start(record)
+            elif rtype == "pipeline_end":
+                index._process_pipeline_end(record)
+            # ignore others
+
+        def _consume_block(txt: str) -> None:
+            try:
+                record = json.loads(txt)
+                _dispatch(record)
+            except json.JSONDecodeError:
+                # Try line-by-line
+                for ln in txt.splitlines():
+                    if not ln.strip():
+                        continue
+                    try:
+                        record = json.loads(ln)
+                        _dispatch(record)
+                    except json.JSONDecodeError:
+                        continue
+
+        def _dispatch(record: Dict[str, Any]) -> None:
+            run_id = (
+                (record.get("ids") or {}).get("run_id")
+                or record.get("run_id")
+                or "unknown"
+            )
+            idx = _get_or_make(run_id)
+            _route_record(idx, record)
+            _touch_meta(run_id, record)
+
+        # Read JSON array or JSON(L)
+        try:
+            with p.open("r", encoding="utf-8") as f:
+                first_char = f.read(1)
+                f.seek(0)
+
+                if first_char == "[":
+                    # JSON array
+                    content = f.read()
+                    data = json.loads(content)
+                    if not isinstance(data, list):
+                        raise ValueError("SER JSON must be an array of records")
+                    for record in data:
+                        _dispatch(record)
+                else:
+                    # JSONL (supports pretty records separated by blank lines, same as SERIndex)
+                    buf: List[str] = []
+                    for raw in f:
+                        line = raw.strip()
+                        if not line:
+                            if buf:
+                                _consume_block("\n".join(buf))
+                                buf = []
+                            continue
+                        buf.append(raw)
+                    if buf:
+                        _consume_block("\n".join(buf))
+        except Exception as e:
+            raise ValueError(f"Failed to read SER file: {e}")
+
+        # post-process: compute averages and topology for each run
+        for run_id, idx in inst.by_run.items():
+            # Copy metadata to individual SERIndex objects
+            meta = inst.meta_by_run[run_id]
+            idx.total_events = meta.total_events
+            idx.pipeline_id = meta.pipeline_id
+            idx.run_id = meta.run_id
+
+            for _, agg in idx.per_node.items():
+                total = agg.count_after + agg.count_error
+                if total > 0 and agg.t_wall_sum > 0:
+                    agg.t_wall_avg = agg.t_wall_sum / total
+            if not idx.canonical_nodes:
+                idx._build_graph_from_topology()
+
+        return inst
+
+    # ---- API ----
+    def list_runs(self) -> List[Dict[str, Any]]:
+        """Get list of all runs with metadata."""
+        out = []
+        for rm in self.meta_by_run.values():
+            out.append(
+                {
+                    "run_id": rm.run_id,
+                    "pipeline_id": rm.pipeline_id,
+                    "started_at": rm.started_at,
+                    "ended_at": rm.ended_at,
+                    "total_events": rm.total_events,
+                }
+            )
+        # stable order by started_at then run_id
+        out.sort(key=lambda r: ((r["started_at"] or ""), r["run_id"]))
+        return out
+
+    def default_run_id(self) -> Optional[str]:
+        """Get the default run ID (first encountered or earliest started)."""
+        return self._default_run or (
+            self.list_runs()[0]["run_id"] if self.by_run else None
+        )
+
+    def get(self, run_id: Optional[str]) -> SERIndex:
+        """Get SERIndex for specific run."""
+        rid = run_id or self.default_run_id()
+        if not rid or rid not in self.by_run:
+            raise KeyError(f"Run not found: {run_id}")
+        return self.by_run[rid]
+
+    def get_meta(self, run_id: Optional[str]) -> Dict[str, Any]:
+        """Get metadata for specific run."""
+        return self.get(run_id).get_meta()
+
+    def summary(self, run_id: Optional[str]) -> Dict[str, Any]:
+        """Get summary for specific run."""
+        return self.get(run_id).summary()
+
+    def node_events(
+        self, run_id: Optional[str], node_uuid: str, offset: int, limit: int
+    ) -> Dict[str, Any]:
+        """Get node events for specific run."""
+        return self.get(run_id).node_events(node_uuid, offset, limit)

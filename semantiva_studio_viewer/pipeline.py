@@ -35,10 +35,10 @@ app = FastAPI()
 
 def _detect_ser_file(file_path: str) -> bool:
     """Detect if a JSONL file contains SER records.
-    
+
     Args:
         file_path: Path to the JSONL file
-        
+
     Returns:
         True if any line contains type: "ser", False otherwise
     """
@@ -64,28 +64,41 @@ def _detect_ser_file(file_path: str) -> bool:
 
 def _ensure_trace_loaded():
     """Try to lazily load trace file if app.state.trace_index is not present and a path was provided."""
-    if hasattr(app.state, "trace_index") and app.state.trace_index:
+    if hasattr(app.state, "trace_loaded") and app.state.trace_loaded:
         return
     trace_path = getattr(app.state, "trace_jsonl", None)
     if not trace_path:
+        app.state.trace_loaded = True
         return
     try:
         trace_file = Path(trace_path)
         if trace_file.exists() and trace_file.is_file():
             # Auto-detect file format by checking for SER records
             is_ser_file = _detect_ser_file(trace_path)
-            
+
             if is_ser_file:
-                from .ser_index import SERIndex
-                app.state.trace_index = SERIndex.from_jsonl(trace_path)
-                print(f"Lazy-loaded SER file: {trace_path}")
+                # Prefer multi-run index; falls back to single SERIndex if only one run present
+                try:
+                    from .ser_index import MultiSERIndex
+
+                    app.state.trace_index = MultiSERIndex.from_json_or_jsonl(trace_path)
+                    print(f"Lazy-loaded multi-run SER file: {trace_path}")
+                except Exception:
+                    # Back-compat: load single SERIndex
+                    from .ser_index import SERIndex
+
+                    app.state.trace_index = SERIndex.from_jsonl(trace_path)
+                    print(f"Lazy-loaded single SER file: {trace_path}")
             else:
                 from .trace_index import TraceIndex
+
                 app.state.trace_index = TraceIndex.from_jsonl(trace_path)
                 print(f"Lazy-loaded legacy trace file: {trace_path}")
+        app.state.trace_loaded = True
     except Exception as e:
         print(f"Warning: Failed to lazy-load trace file {trace_path}: {e}")
         app.state.trace_index = None
+        app.state.trace_loaded = True
 
 
 @app.middleware("http")
@@ -194,64 +207,98 @@ def get_pipeline_api():
         )
 
 
+def _get_trace_index_for_run(run: str | None):
+    """Get trace index for specific run, handling both single and multi-run cases."""
+    _ensure_trace_loaded()
+    ti = getattr(app.state, "trace_index", None)
+    if ti is None:
+        raise HTTPException(status_code=404, detail="No trace data available.")
+    if hasattr(ti, "get"):  # MultiSERIndex
+        try:
+            return ti.get(run)
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    return ti  # SERIndex
+
+
+@app.get("/api/runs")
+def list_runs():
+    """Get list of available runs.
+
+    Returns:
+        List of run metadata with run_id, pipeline_id, started_at, ended_at, total_events
+    """
+    _ensure_trace_loaded()
+    ti = getattr(app.state, "trace_index", None)
+    if ti is None:
+        return []
+    if hasattr(ti, "list_runs"):
+        return ti.list_runs()
+    # Single-run fallback
+    meta = ti.get_meta()
+    return [
+        {
+            "run_id": meta.get("run_id"),
+            "pipeline_id": meta.get("pipeline_id"),
+            "started_at": meta.get("timing", {}).get("start") or meta.get("started_at"),
+            "ended_at": meta.get("timing", {}).get("end") or meta.get("ended_at"),
+            "total_events": meta.get("event_count", 0),
+        }
+    ]
+
+
 @app.get("/")
 def index():
     return FileResponse(Path(__file__).parent / "web_gui" / "index.html")
 
 
 @app.get("/api/trace/meta")
-def get_trace_meta():
+def get_trace_meta(run: str | None = None):
     """Get trace metadata.
+
+    Args:
+        run: Optional run ID to get metadata for specific run
 
     Returns:
         Dict containing run_id, pipeline_id, file info, counts, warnings
 
     Raises:
-        HTTPException: If no trace is loaded
+        HTTPException: If no trace is loaded or run not found
     """
-    # Ensure trace is loaded (lazy load if --trace-jsonl was provided but loading deferred)
-    _ensure_trace_loaded()
-    if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No trace data available. Load a trace file with --trace-jsonl.",
-        )
-    meta = app.state.trace_index.get_meta()
+    ti = _get_trace_index_for_run(run)
+    meta = ti.get_meta()
     # Also expose canonical nodes (if available) for UI to show declaration_index/subindex
-    if (
-        hasattr(app.state.trace_index, "canonical_nodes")
-        and app.state.trace_index.canonical_nodes
-    ):
-        meta["canonical_nodes"] = list(app.state.trace_index.canonical_nodes.values())
+    if hasattr(ti, "canonical_nodes") and ti.canonical_nodes:
+        meta["canonical_nodes"] = list(ti.canonical_nodes.values())
     return meta
 
 
 @app.get("/api/trace/summary")
-def get_trace_summary():
+def get_trace_summary(run: str | None = None):
     """Get aggregated trace data for all nodes.
+
+    Args:
+        run: Optional run ID to get summary for specific run
 
     Returns:
         Dict with "nodes" key containing per-node aggregates
 
     Raises:
-        HTTPException: If no trace is loaded
+        HTTPException: If no trace is loaded or run not found
     """
-    _ensure_trace_loaded()
-    if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No trace data available. Load a trace file with --trace-jsonl.",
-        )
-
-    return app.state.trace_index.summary()
+    ti = _get_trace_index_for_run(run)
+    return ti.summary()
 
 
 @app.get("/api/trace/node/{node_uuid}")
-def get_trace_node_events(node_uuid: str, offset: int = 0, limit: int = 100):
+def get_trace_node_events(
+    node_uuid: str, run: str | None = None, offset: int = 0, limit: int = 100
+):
     """Get detailed events for a specific node.
 
     Args:
         node_uuid: UUID of the node to get events for
+        run: Optional run ID to get events for specific run
         offset: Number of events to skip (for paging)
         limit: Maximum number of events to return
 
@@ -259,40 +306,32 @@ def get_trace_node_events(node_uuid: str, offset: int = 0, limit: int = 100):
         Dict containing events list, total count, and paging info
 
     Raises:
-        HTTPException: If no trace is loaded or invalid parameters
+        HTTPException: If no trace is loaded, invalid parameters, or run not found
     """
-    _ensure_trace_loaded()
-    if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No trace data available. Load a trace file with --trace-jsonl.",
-        )
-
     # Validate parameters
     if offset < 0:
         raise HTTPException(status_code=400, detail="Offset must be non-negative")
     if limit < 1 or limit > 1000:
         raise HTTPException(status_code=400, detail="Limit must be between 1 and 1000")
 
-    return app.state.trace_index.node_events(node_uuid, offset, limit)
+    ti = _get_trace_index_for_run(run)
+    return ti.node_events(node_uuid, offset, limit)
 
 
 @app.get("/api/trace/mapping")
-def get_trace_label_mapping():
+def get_trace_label_mapping(run: str | None = None):
     """Get mapping from pipeline node labels to trace UUIDs.
+
+    Args:
+        run: Optional run ID to get mapping for specific run
 
     Returns:
         Dict mapping pipeline node labels to trace node UUIDs
 
     Raises:
-        HTTPException: If no trace is loaded
+        HTTPException: If no trace is loaded or run not found
     """
-    _ensure_trace_loaded()
-    if not hasattr(app.state, "trace_index") or app.state.trace_index is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No trace data available. Load a trace file with --trace-jsonl.",
-        )
+    ti = _get_trace_index_for_run(run)
 
     # Get pipeline nodes using the same logic as get_pipeline_api
     try:
@@ -309,7 +348,7 @@ def get_trace_label_mapping():
         )
 
     # Build positional mapping first, then optional legacy heuristics
-    meta = app.state.trace_index.get_meta()
+    meta = ti.get_meta()
     index_to_uuid = meta.get("node_mappings", {}).get("index_to_uuid", {})
 
     label_to_uuid = {}
@@ -325,14 +364,14 @@ def get_trace_label_mapping():
             label_to_uuid[node["label"]] = uuid
         else:
             # Last resort: legacy heuristic
-            legacy_uuid = app.state.trace_index.find_node_uuid_by_label(node["label"])
+            legacy_uuid = ti.find_node_uuid_by_label(node["label"])
             if legacy_uuid:
                 label_to_uuid[node["label"]] = legacy_uuid
 
     return {
         "label_to_uuid": label_to_uuid,
         "available_labels": [node["label"] for node in nodes],
-        "available_fqns": list(app.state.trace_index.fqn_to_node_uuid.keys()),
+        "available_fqns": list(ti.fqn_to_node_uuid.keys()),
         "node_mappings": {
             "index_to_uuid": index_to_uuid,
             "uuid_to_index": meta.get("node_mappings", {}).get("uuid_to_index", {}),
@@ -377,6 +416,7 @@ def serve_pipeline(
     # Initialize core Semantiva components before loading configuration
     # This ensures that built-in processors like FloatMultiplyOperation are registered
     from semantiva.registry.class_registry import ClassRegistry
+
     ClassRegistry.initialize_default_modules()
 
     try:
@@ -387,6 +427,7 @@ def serve_pipeline(
 
     app.state.config = config
     app.state.trace_index = None
+    app.state.trace_loaded = False
     # Keep the trace path so endpoints can attempt lazy-loading if needed
     app.state.trace_jsonl = trace_jsonl
 
@@ -401,21 +442,42 @@ def serve_pipeline(
             else:
                 # Auto-detect file format
                 is_ser_file = _detect_ser_file(trace_jsonl)
-                
+
                 if is_ser_file:
                     print(f"Loading SER file: {trace_jsonl}")
-                    from .ser_index import SERIndex
-                    app.state.trace_index = SERIndex.from_jsonl(trace_jsonl)
-                    print(
-                        f"SER data loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)"
-                    )
+                    # Prefer multi-run index; falls back to single SERIndex if only one run present
+                    try:
+                        from .ser_index import MultiSERIndex
+
+                        app.state.trace_index = MultiSERIndex.from_json_or_jsonl(
+                            trace_jsonl
+                        )
+                        runs = app.state.trace_index.list_runs()
+                        if len(runs) > 1:
+                            print(
+                                f"Multi-run SER data loaded: {len(runs)} runs ({len(app.state.trace_index.by_run)} indices)"
+                            )
+                        else:
+                            print(
+                                f"Single-run SER data loaded: {runs[0]['run_id'] if runs else 'unknown'}"
+                            )
+                    except Exception:
+                        # Back-compat: load single SERIndex
+                        from .ser_index import SERIndex
+
+                        app.state.trace_index = SERIndex.from_jsonl(trace_jsonl)
+                        print(
+                            f"SER data loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)"
+                        )
                 else:
                     print(f"Loading legacy trace file: {trace_jsonl}")
                     from .trace_index import TraceIndex
+
                     app.state.trace_index = TraceIndex.from_jsonl(trace_jsonl)
                     print(
                         f"Trace loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)"
                     )
+                app.state.trace_loaded = True
         except ImportError:
             print("Warning: Trace indexing not available, trace file will be ignored")
         except Exception as e:
@@ -501,6 +563,7 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
     # Initialize core Semantiva components before loading configuration
     # This ensures that built-in processors are available during export
     from semantiva.registry.class_registry import ClassRegistry
+
     ClassRegistry.initialize_default_modules()
 
     try:
@@ -514,19 +577,40 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
         try:
             # Auto-detect file format
             is_ser_file = _detect_ser_file(trace_jsonl)
-            
+
             if is_ser_file:
                 print(f"Loading SER file for export: {trace_jsonl}")
-                from .ser_index import SERIndex
-                trace_index = SERIndex.from_jsonl(trace_jsonl)
+                from .ser_index import MultiSERIndex
+
+                trace_index = MultiSERIndex.from_json_or_jsonl(trace_jsonl)
             else:
                 print(f"Loading legacy trace file for export: {trace_jsonl}")
                 from .trace_index import TraceIndex
+
                 trace_index = TraceIndex.from_jsonl(trace_jsonl)
 
             # Build trace data for injection
-            trace_meta = trace_index.get_meta()
-            trace_summary = trace_index.summary()
+            runs_list = []
+            if hasattr(trace_index, "list_runs"):
+                runs_list = trace_index.list_runs()
+                print(f"Found {len(runs_list)} runs for export")
+
+            # For MultiSERIndex, use the default run for initial metadata and mappings
+            default_run_id = None
+            if runs_list:
+                default_run_id = trace_index.default_run_id()
+                # Get the SERIndex for the default run
+                default_ser_index = trace_index.get(default_run_id)
+                trace_meta = default_ser_index.get_meta()
+                trace_summary = (
+                    trace_index.summary(default_run_id)
+                    if hasattr(trace_index, "summary")
+                    else default_ser_index.summary()
+                )
+            else:
+                # Single run case
+                trace_meta = trace_index.get_meta()
+                trace_summary = trace_index.summary()
 
             # Build positional label to UUID mapping using index_to_uuid
             pipeline_data = build_pipeline_json(config)
@@ -545,7 +629,11 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
             trace_mapping = {
                 "label_to_uuid": label_to_uuid,
                 "available_labels": [node["label"] for node in pipeline_data["nodes"]],
-                "available_fqns": list(trace_index.fqn_to_node_uuid.keys()),
+                "available_fqns": list(
+                    (
+                        default_ser_index if runs_list else trace_index
+                    ).fqn_to_node_uuid.keys()
+                ),
                 "node_mappings": {
                     "index_to_uuid": index_to_uuid,
                     "uuid_to_index": trace_meta.get("node_mappings", {}).get(
@@ -554,18 +642,84 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
                 },
             }
 
-            # Store all trace data
+            # Store all trace data with per-run metadata/summary/mapping
             trace_data = {
-                "meta": trace_meta,
-                "summary": trace_summary,
-                "mapping": trace_mapping,
+                "meta": trace_meta,  # Default run metadata
+                "summary": trace_summary,  # Default run summary
+                "mapping": trace_mapping,  # Default run mapping
                 "node_events": {},  # Will be populated with individual node events
+                "runs": runs_list,  # Include runs list for multi-run support
+                "per_run": {},  # Per-run metadata, summary, and mapping
             }
 
-            # Pre-load events for all mapped nodes
-            for label, uuid in label_to_uuid.items():
-                events_response = trace_index.node_events(uuid, offset=0, limit=100)
-                trace_data["node_events"][uuid] = events_response
+            # Pre-compute metadata, summary, and mapping for each run
+            if runs_list:
+                for run_info in runs_list:
+                    run_id = run_info["run_id"]
+                    try:
+                        run_ser_index = trace_index.get(run_id)
+                        run_meta = run_ser_index.get_meta()
+                        run_summary = run_ser_index.summary()
+
+                        # Build run-specific mapping (should be same structure as default)
+                        run_mapping = {
+                            "label_to_uuid": label_to_uuid,  # Same for all runs
+                            "available_labels": [
+                                node["label"] for node in pipeline_data["nodes"]
+                            ],
+                            "available_fqns": list(
+                                run_ser_index.fqn_to_node_uuid.keys()
+                            ),
+                            "node_mappings": {
+                                "index_to_uuid": index_to_uuid,
+                                "uuid_to_index": run_meta.get("node_mappings", {}).get(
+                                    "uuid_to_index", {}
+                                ),
+                            },
+                        }
+
+                        trace_data["per_run"][run_id] = {
+                            "meta": run_meta,
+                            "summary": run_summary,
+                            "mapping": run_mapping,
+                        }
+                    except Exception as e:
+                        print(
+                            f"Warning: Failed to compute per-run data for {run_id}: {e}"
+                        )
+
+            # Pre-load events for all mapped nodes across all runs
+            # Structure: trace_data["node_events"][run_id][uuid] = events
+            trace_data["node_events"] = {}
+
+            if runs_list:
+                # Multi-run: load events for each run
+                for run_info in runs_list:
+                    run_id = run_info["run_id"]
+                    trace_data["node_events"][run_id] = {}
+
+                    # Get the SERIndex for this specific run
+                    try:
+                        run_ser_index = trace_index.get(run_id)
+                        for label, uuid in label_to_uuid.items():
+                            try:
+                                events_response = run_ser_index.node_events(
+                                    uuid, offset=0, limit=100
+                                )
+                                trace_data["node_events"][run_id][
+                                    uuid
+                                ] = events_response
+                            except Exception as e:
+                                print(
+                                    f"Warning: Failed to load events for {label} ({uuid}) in run {run_id}: {e}"
+                                )
+                    except Exception as e:
+                        print(f"Warning: Failed to get SERIndex for run {run_id}: {e}")
+            else:
+                # Single run: keep existing structure for backward compatibility
+                for label, uuid in label_to_uuid.items():
+                    events_response = trace_index.node_events(uuid, offset=0, limit=100)
+                    trace_data["node_events"][uuid] = events_response
 
             data_source = "SER" if is_ser_file else "legacy trace"
             print(
@@ -635,25 +789,62 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
 
     # Build trace endpoint mocks if trace data is available
     trace_endpoints = ""
+    runs_endpoint = ""
     if trace_data:
-        trace_endpoints = """
-  if (url === '/api/trace/meta') {
-    return Promise.resolve({ok: true, json: () => Promise.resolve(window.TRACE_DATA.meta)});
+        # Add runs endpoint mock if we have runs data
+        if trace_data.get("runs"):
+            runs_endpoint = """
+  if (url === '/api/runs') {
+    return Promise.resolve({ok: true, json: () => Promise.resolve(window.TRACE_DATA.runs)});
+  }"""
+
+        trace_endpoints = (
+            runs_endpoint
+            + """
+  if (url === '/api/trace/meta' || url.startsWith('/api/trace/meta?')) {
+    const urlObj = new URL(url, 'http://localhost');
+    const runParam = urlObj.searchParams.get('run');
+    const data = runParam && window.TRACE_DATA.per_run[runParam] 
+      ? window.TRACE_DATA.per_run[runParam].meta 
+      : window.TRACE_DATA.meta;
+    return Promise.resolve({ok: true, json: () => Promise.resolve(data)});
   }
-  if (url === '/api/trace/summary') {
-    return Promise.resolve({ok: true, json: () => Promise.resolve(window.TRACE_DATA.summary)});
+  if (url === '/api/trace/summary' || url.startsWith('/api/trace/summary?')) {
+    const urlObj = new URL(url, 'http://localhost');
+    const runParam = urlObj.searchParams.get('run');
+    const data = runParam && window.TRACE_DATA.per_run[runParam] 
+      ? window.TRACE_DATA.per_run[runParam].summary 
+      : window.TRACE_DATA.summary;
+    return Promise.resolve({ok: true, json: () => Promise.resolve(data)});
   }
-  if (url === '/api/trace/mapping') {
-    return Promise.resolve({ok: true, json: () => Promise.resolve(window.TRACE_DATA.mapping)});
+  if (url === '/api/trace/mapping' || url.startsWith('/api/trace/mapping?')) {
+    const urlObj = new URL(url, 'http://localhost');
+    const runParam = urlObj.searchParams.get('run');
+    const data = runParam && window.TRACE_DATA.per_run[runParam] 
+      ? window.TRACE_DATA.per_run[runParam].mapping 
+      : window.TRACE_DATA.mapping;
+    return Promise.resolve({ok: true, json: () => Promise.resolve(data)});
   }
   if (url.startsWith('/api/trace/node/')) {
-    const nodeUuid = url.split('/api/trace/node/')[1];
-    const events = window.TRACE_DATA.node_events[nodeUuid];
+    const nodeUuid = url.split('/api/trace/node/')[1].split('?')[0];
+    const urlObj = new URL(url, 'http://localhost');
+    const runParam = urlObj.searchParams.get('run');
+    
+    let events;
+    if (runParam && window.TRACE_DATA.node_events[runParam]) {
+      // Multi-run structure: node_events[run_id][uuid]
+      events = window.TRACE_DATA.node_events[runParam][nodeUuid];
+    } else if (!runParam && window.TRACE_DATA.node_events[nodeUuid]) {
+      // Legacy single-run structure: node_events[uuid]
+      events = window.TRACE_DATA.node_events[nodeUuid];
+    }
+    
     if (events) {
       return Promise.resolve({ok: true, json: () => Promise.resolve(events)});
     }
     return Promise.resolve({ok: false, status: 404});
   }"""
+        )
 
     # Inject as parseable JSON strings to avoid embedding raw JSON directly in HTML
     injection = (

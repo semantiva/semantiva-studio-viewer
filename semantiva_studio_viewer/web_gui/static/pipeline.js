@@ -300,7 +300,7 @@
     }
 
     // Individual node component with anchor placeholders
-    function PipelineNode({ node, pos, isSelected, onClick, registerAnchors, width, height, traceAgg, traceOverlayVisible }) {
+  function PipelineNode({ node, pos, isSelected, onClick, registerAnchors, width, height, traceAgg, traceOverlayVisible, getCalloutHoverText }) {
       const nodeRef = useRef(null);
       const topRefs = useRef([null]);
       const bottomRefs = useRef([null]);
@@ -495,6 +495,7 @@
                 ref={el => (paramRightRefs.current[i] = el)}
                 className="param-label right-anchor"
                 style={createCalloutStyle('context', param)}
+                title={getCalloutHoverText ? getCalloutHoverText(node.id, 'param', param) : undefined}
               >
                 {param}
               </div>
@@ -504,6 +505,7 @@
                 key={key}
                 className="param-label created-key"
                 style={createCalloutStyle('created', key)}
+                title={getCalloutHoverText ? getCalloutHoverText(node.id, 'created', key) : undefined}
               >
                 {key}
               </div>
@@ -530,6 +532,7 @@
                 key={param}
                 className="param-label left-anchor"
                 style={createCalloutStyle('config', param)}
+                title={getCalloutHoverText ? getCalloutHoverText(node.id, 'param', param) : undefined}
               >
                 {param}
               </div>
@@ -539,6 +542,7 @@
                 key={param}
                 className="param-label left-anchor-default"
                 style={createCalloutStyle('default', param)}
+                title={getCalloutHoverText ? getCalloutHoverText(node.id, 'param', param) : undefined}
               >
                 {param}
               </div>
@@ -549,7 +553,7 @@
     }
 
     // Custom Graph Component with dual-channel layout
-    function CustomGraph({ nodes, edges, onNodeClick, selectedNodeId, traceAvailable, traceOverlayVisible, getTraceAggForNode }) {
+  function CustomGraph({ nodes, edges, onNodeClick, selectedNodeId, traceAvailable, traceOverlayVisible, getTraceAggForNode, getCalloutHoverText }) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [containerRef, setContainerRef] = useState(null);
   // CoordinateSystem helper instance
@@ -888,6 +892,7 @@
                 height={pos.height}
                 traceAgg={traceAgg}
                 traceOverlayVisible={traceOverlayVisible}
+                getCalloutHoverText={getCalloutHoverText}
               />
             );
           })}
@@ -911,6 +916,15 @@
       // Mobile detection state
       const [isMobileView, setIsMobileView] = useState(isMobile());
 
+      // Multi-run state
+      const [runs, setRuns] = useState([]);
+      const [currentRun, setCurrentRun] = useState(null);
+      
+  // Scroll preservation: detail panel or window
+  const detailPanelRef = useRef(null);
+  const traceSectionRef = useRef(null);
+  const scrollRestoreRef = useRef({ mode: null, detailTop: 0, windowTop: 0, traceLocked: false, _raf1: null, _raf2: null });
+
       // Trace overlay state
       const [traceAvailable, setTraceAvailable] = useState(false);
       const [traceMeta, setTraceMeta] = useState(null);
@@ -922,7 +936,49 @@
 
       // Resizable panels
       const sidebar = useResizable(400, 200, 600);
-      const details = useResizableRight(375, 200, 500);
+  const details = useResizableRight(375, 200, 10000);
+
+      // Wrap fetch helper for trace endpoints
+      const traceFetch = (path) => {
+        // In export mode (file:// or mocked fetch), just use the path directly
+        if (window.location.protocol === 'file:' || window.TRACE_DATA) {
+          const url = path + (currentRun ? `?run=${encodeURIComponent(currentRun)}` : '');
+          return fetch(url);
+        }
+        // In server mode, construct proper URL
+        const u = new URL(path, window.location.origin);
+        if (currentRun) u.searchParams.set('run', currentRun);
+        return fetch(u.toString());
+      };
+
+      useEffect(() => {
+        // Load runs if endpoint exists; in export mode this may throw and we simply proceed without runs.
+        fetch('/api/runs')
+          .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+          .then(list => {
+            setRuns(list || []);
+            // select from URL ?run=..., else first item
+            const urlParams = new URLSearchParams(window.location.search);
+            const pre = urlParams.get('run');
+            const preNode = urlParams.get('node');
+            const chosen = (pre && (list || []).find(x => x.run_id === pre)) ? pre
+                          : ((list && list.length) ? list[0].run_id : null);
+            setCurrentRun(chosen);
+            if (chosen && pre !== chosen) {
+              const u = new URL(window.location.href);
+              u.searchParams.set('run', chosen);
+              if (preNode) u.searchParams.set('node', preNode);
+              window.history.replaceState({}, '', u.toString());
+            }
+            if (preNode) setSelectedNodeId(preNode);
+          })
+          .catch(err => {
+            // No runs endpoint (export) or server without runs; continue without runs
+            console.log('Runs endpoint unavailable or empty:', err.message);
+            setRuns([]);
+            setCurrentRun(null);
+          });
+      }, []);
 
       useEffect(() => {
         console.log('Loading pipeline data...');
@@ -996,69 +1052,83 @@
             setNodeMap(map);
             setLoading(false);
             
-            // Try to load trace data if available
-            fetch('/api/trace/meta')
-              .then(r => {
-                if (r.ok) return r.json();
-                throw new Error('No trace data');
-              })
-              .then(meta => {
-                console.log('Trace metadata loaded:', meta);
-                setTraceMeta(meta);
-                setTraceAvailable(true);
-                
-                // Store FQN to UUID mappings
-                if (meta.node_mappings && meta.node_mappings.fqn_to_uuid) {
-                  const mappings = new Map();
-                  Object.entries(meta.node_mappings.fqn_to_uuid).forEach(([fqn, uuid]) => {
-                    mappings.set(fqn, uuid);
-                  });
-                  setTraceFqnToUuid(mappings);
-                }
-                
-                // Load trace summary
-                return fetch('/api/trace/summary');
-              })
-              .then(r => {
-                if (r.ok) return r.json();
-                throw new Error('Failed to load trace summary');
-              })
-              .then(summary => {
-                console.log('Trace summary loaded:', summary);
-                const summaryMap = new Map();
-                if (summary.nodes) {
-                  Object.entries(summary.nodes).forEach(([nodeUuid, agg]) => {
-                    summaryMap.set(nodeUuid, agg);
-                  });
-                }
-                setTraceSummary(summaryMap);
-                
-                // Load label to UUID mapping
-                return fetch('/api/trace/mapping');
-              })
-              .then(r => {
-                if (r.ok) return r.json();
-                throw new Error('Failed to load trace mapping');
-              })
-              .then(mapping => {
-                console.log('Trace label mapping loaded:', mapping);
-                const labelMap = new Map();
-                Object.entries(mapping.label_to_uuid || {}).forEach(([label, uuid]) => {
-                  labelMap.set(label, uuid);
-                });
-                setTraceLabelToUuid(labelMap);
-              })
-              .catch(err => {
-                console.log('No trace data available:', err.message);
-                setTraceAvailable(false);
-              });
+            // Load trace data. If currentRun is set we'll scope by run; otherwise
+            // try once (exported HTML has inline TRACE_DATA mocks without runs).
+            loadTraceData();
           })
           .catch(err => {
             console.error('Error loading pipeline:', err);
             setError(err.message);
             setLoading(false);
           });
-      }, []);
+      }, []); // Load pipeline only once on mount
+
+      // Separate effect to reload trace data when currentRun changes
+      useEffect(() => {
+        // Only reload trace if we already have pipeline data
+        if (rfNodes.length > 0) {
+          loadTraceData();
+        }
+      }, [currentRun]);
+
+      const loadTraceData = () => {
+        // Try to load trace data if available
+        traceFetch('/api/trace/meta')
+          .then(r => {
+            if (r.ok) return r.json();
+            throw new Error('No trace data');
+          })
+          .then(meta => {
+            console.log('Trace metadata loaded:', meta);
+            setTraceMeta(meta);
+            setTraceAvailable(true);
+            
+            // Store FQN to UUID mappings
+            if (meta.node_mappings && meta.node_mappings.fqn_to_uuid) {
+              const mappings = new Map();
+              Object.entries(meta.node_mappings.fqn_to_uuid).forEach(([fqn, uuid]) => {
+                mappings.set(fqn, uuid);
+              });
+              setTraceFqnToUuid(mappings);
+            }
+            
+            // Load trace summary
+            return traceFetch('/api/trace/summary');
+          })
+          .then(r => {
+            if (r.ok) return r.json();
+            throw new Error('Failed to load trace summary');
+          })
+          .then(summary => {
+            console.log('Trace summary loaded:', summary);
+            const summaryMap = new Map();
+            if (summary.nodes) {
+              Object.entries(summary.nodes).forEach(([nodeUuid, agg]) => {
+                summaryMap.set(nodeUuid, agg);
+              });
+            }
+            setTraceSummary(summaryMap);
+            
+            // Load label to UUID mapping
+            return traceFetch('/api/trace/mapping');
+          })
+          .then(r => {
+            if (r.ok) return r.json();
+            throw new Error('Failed to load trace mapping');
+          })
+          .then(mapping => {
+            console.log('Trace label mapping loaded:', mapping);
+            const labelMap = new Map();
+            Object.entries(mapping.label_to_uuid || {}).forEach(([label, uuid]) => {
+              labelMap.set(label, uuid);
+            });
+            setTraceLabelToUuid(labelMap);
+          })
+          .catch(err => {
+            console.log('No trace data available:', err.message);
+            setTraceAvailable(false);
+          });
+      };
 
       // Mobile detection resize listener
       useEffect(() => {
@@ -1067,8 +1137,106 @@
         return () => window.removeEventListener('resize', handleResize);
       }, []);
 
+      // Validate and sync ?node= from URL against nodeMap once available
+      useEffect(() => {
+        if (!nodeMap || Object.keys(nodeMap).length === 0) return;
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlNode = urlParams.get('node');
+        if (urlNode && nodeMap[parseInt(urlNode)]) {
+          // ensure state reflects URL
+          if (selectedNodeId !== urlNode) setSelectedNodeId(urlNode);
+          setNodeInfo(nodeMap[parseInt(urlNode)]);
+        } else if (urlNode && !nodeMap[parseInt(urlNode)]) {
+          // remove invalid node from URL
+          const u = new URL(window.location.href);
+          u.searchParams.delete('node');
+          window.history.replaceState({}, '', u.toString());
+        }
+      }, [nodeMap]);
+
+      // Restore scroll position after trace data loads/layout settles
+      useEffect(() => {
+        if (traceLabelToUuid.size === 0) return;
+        const restore = () => {
+          const { mode, detailTop, windowTop } = scrollRestoreRef.current || {};
+          if (!mode) return;
+          if (mode === 'detail' && detailPanelRef.current) {
+            detailPanelRef.current.scrollTop = detailTop;
+          } else if (mode === 'window') {
+            window.scrollTo({ top: windowTop });
+          }
+          // Do not unlock height here; a dedicated effect will animate height to the new content when ready
+          // Keep traceLocked until animation completes
+        };
+        const raf1 = requestAnimationFrame(() => {
+          const raf2 = requestAnimationFrame(restore);
+          scrollRestoreRef.current._raf2 = raf2;
+        });
+        scrollRestoreRef.current._raf1 = raf1;
+        return () => {
+          if (scrollRestoreRef.current._raf1) cancelAnimationFrame(scrollRestoreRef.current._raf1);
+          if (scrollRestoreRef.current._raf2) cancelAnimationFrame(scrollRestoreRef.current._raf2);
+        };
+      }, [traceLabelToUuid, currentRun]);
+
+      // Animate the trace section height to match new content once ready (or after a short delay)
+      useEffect(() => {
+        if (!scrollRestoreRef.current.traceLocked) return;
+        const traceEl = traceSectionRef.current;
+        if (!traceEl) return;
+
+        // consider content ready when we have events for the selected node in the new run
+        let ready = false;
+        const now = Date.now();
+        const deadline = scrollRestoreRef.current.unlockDeadline || 0;
+        try {
+          const currentNode = nodeMap && selectedNodeId ? nodeMap[parseInt(selectedNodeId)] : null;
+          if (currentNode && traceLabelToUuid && traceLabelToUuid.size) {
+            const nodeUuid = currentNode.node_uuid || traceLabelToUuid.get(currentNode.label);
+            const runMap = nodeTraceEvents.get(currentRun) || new Map();
+            if (nodeUuid && runMap.has(nodeUuid)) {
+              const evs = runMap.get(nodeUuid) || [];
+              ready = evs.length > 0;
+            }
+          }
+        } catch (_) {}
+
+        if (!ready && now < deadline) {
+          const t = setTimeout(() => {
+            // retrigger effect by a layout read
+            if (traceSectionRef.current) void traceSectionRef.current.offsetHeight;
+          }, 80);
+          return () => clearTimeout(t);
+        }
+
+        // Animate to the new scrollHeight (or current content height after deadline)
+        const newH = traceEl.scrollHeight;
+        requestAnimationFrame(() => {
+          traceEl.style.height = `${Math.max(0, Math.floor(newH))}px`;
+        });
+
+        const cleanup = () => {
+          traceEl.style.height = '';
+          traceEl.style.overflow = '';
+          traceEl.style.transition = '';
+          scrollRestoreRef.current.traceLocked = false;
+          scrollRestoreRef.current.unlockDeadline = 0;
+          // clear scroll restoration state now that animation is done
+          scrollRestoreRef.current.mode = null;
+          scrollRestoreRef.current.detailTop = 0;
+          scrollRestoreRef.current.windowTop = 0;
+        };
+
+        // Fallback timeout in case transitionend doesn't fire
+        const endTimer = setTimeout(() => {
+          if (scrollRestoreRef.current.traceLocked) cleanup();
+        }, 700);
+        traceEl.addEventListener('transitionend', cleanup, { once: true });
+        return () => clearTimeout(endTimer);
+  }, [nodeTraceEvents, traceLabelToUuid, selectedNodeId, currentRun]);
+
       // Function to load trace events for a specific node
-      const loadNodeTraceEvents = useCallback((nodeId) => {
+    const loadNodeTraceEvents = useCallback((nodeId) => {
   if (!traceAvailable || !nodeMap) return;
         
         // Find the UUID for this node using label mapping
@@ -1085,12 +1253,13 @@
           return;
         }
         
-        // Check if we already have events for this node
-        if (nodeTraceEvents.has(nodeUuid)) return;
+  // Check if we already have events for this node in the current run
+  const existingRunMap = nodeTraceEvents.get(currentRun) || new Map();
+  if (existingRunMap.has(nodeUuid)) return;
         
         console.log(`Loading trace events for node ${nodeId} (label: ${label}, UUID: ${nodeUuid})`);
         
-        fetch(`/api/trace/node/${nodeUuid}`)
+        traceFetch(`/api/trace/node/${nodeUuid}`)
           .then(r => {
             if (r.ok) return r.json();
             throw new Error(`Failed to load events for node ${nodeUuid}`);
@@ -1098,12 +1267,18 @@
           .then(response => {
             const events = response.events || [];
             console.log(`Loaded ${events.length} trace events for node ${nodeId}`);
-            setNodeTraceEvents(prev => new Map(prev).set(nodeUuid, events));
+            setNodeTraceEvents(prev => {
+              const outer = new Map(prev);
+              const runMap = new Map(outer.get(currentRun) || []);
+              runMap.set(nodeUuid, events);
+              outer.set(currentRun, runMap);
+              return outer;
+            });
           })
           .catch(err => {
             console.log(`Failed to load trace events for node ${nodeId}:`, err.message);
           });
-      }, [traceAvailable, traceLabelToUuid, nodeMap, nodeTraceEvents]);
+      }, [traceAvailable, traceLabelToUuid, nodeMap, nodeTraceEvents, traceFetch, currentRun]);
 
       // Load trace events when a node is selected
       useEffect(() => {
@@ -1155,11 +1330,73 @@
         return null;
       };
 
+      // Compute a user-friendly value for a callout hover from SER trace.
+      // type: 'param' for any parameter callout (config/default/context), 'created' for produced keys.
+      const getCalloutHoverText = useCallback((nodeId, type, name) => {
+        try {
+          if (!traceAvailable || !name) return undefined;
+          const currentNode = nodeMap[parseInt(nodeId)];
+          if (!currentNode) return undefined;
+
+          // Resolve nodeUuid similarly to details section
+          let nodeUuid = null;
+          if (currentNode.node_uuid) nodeUuid = currentNode.node_uuid;
+          if (!nodeUuid && traceLabelToUuid && currentNode.label) {
+            nodeUuid = traceLabelToUuid.get(currentNode.label);
+          }
+          if (!nodeUuid && traceMeta && traceMeta.node_mappings && traceMeta.node_mappings.fqn_to_uuid) {
+            for (const [fqn, uuid] of Object.entries(traceMeta.node_mappings.fqn_to_uuid)) {
+              if (currentNode.label && fqn.includes(currentNode.label)) { nodeUuid = uuid; break; }
+            }
+          }
+          if (!nodeUuid) return undefined;
+
+          const runMap = nodeTraceEvents.get(currentRun) || new Map();
+          const nodeEvents = runMap.get(nodeUuid) || [];
+          if (!nodeEvents.length) return undefined;
+
+          // Prefer 'after', else 'error', else first
+          let chosen = null;
+          for (const ev of nodeEvents) { if (ev.phase === 'after') chosen = ev; }
+          if (!chosen) { for (const ev of nodeEvents) { if (ev.phase === 'error') { chosen = ev; break; } } }
+          if (!chosen) chosen = nodeEvents[0];
+          const rawData = chosen && chosen._raw;
+          if (!rawData || rawData.type !== 'ser') return undefined;
+
+          if (type === 'param') {
+            if (!rawData.action || !rawData.action.params) return undefined;
+            let pval = rawData.action.params[name];
+            if (pval === undefined) pval = rawData.action.params[name && name.toString ? name.toString() : name];
+            if (pval === undefined) return undefined;
+            if (pval && typeof pval === 'object') {
+              if (pval.repr) return String(pval.repr);
+              try { return JSON.stringify(pval); } catch (e) { return String(pval); }
+            }
+            try { return String(pval); } catch (e) { return ''; }
+          }
+
+          if (type === 'created') {
+            const summaries = (rawData.io_delta && rawData.io_delta.summaries) || rawData.summaries || {};
+            const s = summaries[name] || summaries[name && name.toString ? name.toString() : name];
+            if (s && (s.repr || s.sample || s.preview)) return String(s.repr || s.sample || s.preview);
+            return undefined;
+          }
+
+          return undefined;
+        } catch (err) {
+          return undefined;
+        }
+      }, [traceAvailable, nodeMap, traceMeta, traceLabelToUuid, nodeTraceEvents, currentRun]);
+
       const onNodeClick = (_, node) => {
         console.log('Node clicked:', node);
         const nodeData = nodeMap[parseInt(node.id)];
         setNodeInfo(nodeData);
         setSelectedNodeId(node.id);
+        // Update URL with node selection
+        const u = new URL(window.location.href);
+        u.searchParams.set('node', node.id);
+        window.history.replaceState({}, '', u.toString());
       };
 
       if (error) {
@@ -1364,33 +1601,79 @@
                   </span>
                 )}
                 {traceAvailable && traceMeta && (
-                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                      <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                        Pipeline_run_id: <span style={{ fontWeight: 'bold' }}>{truncateHash(traceMeta.run_id)}</span>
+                  <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                        <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                          Pipeline_run_id: <span style={{ fontWeight: 'bold' }}>{truncateHash(traceMeta.run_id)}</span>
+                        </div>
+                        <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                          Pipeline ID: <span style={{ fontWeight: 'bold' }}>{truncateHash(traceMeta.pipeline_id)}</span>
+                        </div>
                       </div>
-                      <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                        Pipeline ID: <span style={{ fontWeight: 'bold' }}>{truncateHash(traceMeta.pipeline_id)}</span>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.run_id)} style={{ padding: '4px 8px' }}>Copy run_id</button>
+                        <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.pipeline_id)} style={{ padding: '4px 8px' }}>Copy pipeline_id</button>
+                        <button
+                          onClick={() => setTraceOverlayVisible(!traceOverlayVisible)}
+                          style={{
+                            background: traceOverlayVisible ? '#28a745' : '#6c757d',
+                            color: 'white',
+                            border: 'none',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {traceOverlayVisible ? 'Hide' : 'Show'} Overlay
+                        </button>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.run_id)} style={{ padding: '4px 8px' }}>Copy run_id</button>
-                      <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.pipeline_id)} style={{ padding: '4px 8px' }}>Copy pipeline_id</button>
-                      <button
-                        onClick={() => setTraceOverlayVisible(!traceOverlayVisible)}
-                        style={{
-                          background: traceOverlayVisible ? '#28a745' : '#6c757d',
-                          color: 'white',
-                          border: 'none',
-                          padding: '4px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {traceOverlayVisible ? 'Hide' : 'Show'} Overlay
-                      </button>
-                    </div>
+                    {/* Run selector dropdown (second row) */}
+                    {runs && runs.length > 1 && (
+                      <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
+                        <label style={{fontSize:'12px', opacity:0.7}}>Run:</label>
+                        <select
+                          value={currentRun || ''}
+                          onChange={(e) => {
+                            // Save current scroll position (detail panel if scrollable, else window)
+                            const el = detailPanelRef.current;
+                            const isDetailScrollable = !!(el && (el.scrollHeight - el.clientHeight > 4));
+                            if (isDetailScrollable && el) {
+                              scrollRestoreRef.current = { mode: 'detail', detailTop: el.scrollTop, windowTop: window.scrollY };
+                            } else {
+                              scrollRestoreRef.current = { mode: 'window', detailTop: 0, windowTop: window.scrollY };
+                            }
+
+                            // Lock the current height of the Trace section with a smooth height transition
+                            const traceEl = traceSectionRef.current;
+                            if (traceEl) {
+                              const h = traceEl.getBoundingClientRect().height;
+                              traceEl.style.height = `${Math.max(0, Math.floor(h))}px`;
+                              traceEl.style.overflow = 'hidden';
+                              traceEl.style.transition = 'height 280ms ease';
+                              scrollRestoreRef.current.traceLocked = true;
+                              scrollRestoreRef.current.unlockDeadline = Date.now() + 1000; // give content up to 1s to arrive
+                            }
+
+                            const id = e.target.value || null;
+                            setCurrentRun(id);
+                            const u = new URL(window.location.href);
+                            if (id) u.searchParams.set('run', id); else u.searchParams.delete('run');
+                            window.history.replaceState({}, '', u.toString());
+                            // Keep stale node events visible; they'll be replaced as new run data arrives
+                          }}
+                          style={{fontSize:'12px', padding:'2px 4px'}}
+                        >
+                          {runs.map(r => (
+                            <option key={r.run_id} value={r.run_id}>
+                              {(r.run_id || '').slice(0,8)} • {r.started_at || 'n/a'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1428,9 +1711,10 @@
               traceAvailable={traceAvailable}
               traceOverlayVisible={traceOverlayVisible}
               getTraceAggForNode={getTraceAggForNode}
+              getCalloutHoverText={getCalloutHoverText}
             />
           </div>
-          <div id="details" style={{ 
+          <div id="details" ref={detailPanelRef} style={{ 
             width: isMobileView ? '100%' : `${details.width}px`,
             position: 'relative',
             borderLeft: isMobileView ? 'none' : '1px solid #ccc',
@@ -1613,7 +1897,10 @@
                 </div>
                 
                 {/* Trace Information Section */}
-                {traceMeta && traceOverlayVisible && (function() {
+                {(traceOverlayVisible && traceAvailable) && (
+                  <div className="details-section" ref={traceSectionRef}>
+                    <h4 className="details-subheader">Trace records:</h4>
+                    {traceMeta ? (function() {
                   // Bind by node_uuid when possible. Prefer canonical_nodes or mappings from trace meta.
                   const currentNode = nodeMap[parseInt(selectedNodeId)];
                   let nodeUuid = null;
@@ -1642,7 +1929,11 @@
                     canonicalInfo = traceMeta.canonical_nodes.find(n => n.node_uuid === nodeUuid) || null;
                   }
 
-                  const nodeEvents = nodeUuid ? (nodeTraceEvents.get(nodeUuid) || []) : [];
+                  const nodeEvents = (() => {
+                    if (!nodeUuid) return [];
+                    const runMap = nodeTraceEvents.get(currentRun) || new Map();
+                    return runMap.get(nodeUuid) || [];
+                  })();
 
                   // Bucket latest before/after/error events
                   const bucket = { before: null, after: null, error: null };
@@ -1659,9 +1950,8 @@
                   if (bucket.after) status = 'Completed';
                   else if (bucket.error) status = 'Error';
 
-                  return (
-                    <div className="details-section">
-                      <h4 className="details-subheader">Trace records:</h4>
+                      return (
+                        <div>
 
                       {/* Node identifiers */}
                       {nodeUuid && (
@@ -1871,6 +2161,84 @@
                               </div>
                             )}
 
+                            {/* Run Args section */}
+                            {rawData.checks && rawData.checks.why_ok && rawData.checks.why_ok.args && Object.keys(rawData.checks.why_ok.args).length > 0 && (
+                              <div style={{ marginTop: '12px' }}>
+                                <div className="trace-item"><strong>Run Args:</strong></div>
+                                <div style={{ marginLeft: '12px', marginTop: '6px' }}>
+                                  {Object.entries(rawData.checks.why_ok.args).map(([k, v]) => (
+                                    <div key={k} style={{ marginBottom: '6px', display: 'flex', alignItems: 'flex-start' }}>
+                                      <strong style={{ marginRight: '8px', minWidth: '80px' }}>{k}:</strong>
+                                      <span style={{ fontFamily: 'monospace', color: '#333', wordBreak: 'break-word' }}>{String(v)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                                <details style={{ marginTop: '6px', marginLeft: '12px' }}>
+                                  <summary style={{ cursor: 'pointer', fontSize: '12px', color: '#666' }}>View JSON</summary>
+                                  <pre style={{ marginTop: '4px', padding: '8px', background: '#f8f9fa', borderRadius: '4px', fontSize: '11px', overflow: 'auto', maxHeight: '200px' }}>
+                                    {JSON.stringify(rawData.checks.why_ok.args, null, 2)}
+                                  </pre>
+                                </details>
+                              </div>
+                            )}
+
+                            {/* Environment section */}
+                            {rawData.checks && rawData.checks.why_ok && rawData.checks.why_ok.env && (
+                              (function() {
+                                const env = rawData.checks.why_ok.env;
+                                const fp = env.registry && env.registry.fingerprint;
+                                const hasRelevantEnv = env.python || env.platform || env.semantiva || fp;
+                                
+                                if (!hasRelevantEnv) return null;
+                                
+                                return (
+                                  <div style={{ marginTop: '12px' }}>
+                                    <div className="trace-item"><strong>Environment:</strong></div>
+                                    <div style={{ marginLeft: '12px', marginTop: '6px' }}>
+                                      {env.python && (
+                                        <div style={{ marginBottom: '4px', display: 'flex', alignItems: 'center' }}>
+                                          <strong style={{ marginRight: '8px', minWidth: '80px' }}>python:</strong>
+                                          <span style={{ fontFamily: 'monospace', color: '#333' }}>{env.python}</span>
+                                        </div>
+                                      )}
+                                      {env.platform && (
+                                        <div style={{ marginBottom: '4px', display: 'flex', alignItems: 'center' }}>
+                                          <strong style={{ marginRight: '8px', minWidth: '80px' }}>platform:</strong>
+                                          <span style={{ fontFamily: 'monospace', color: '#333' }}>{env.platform}</span>
+                                        </div>
+                                      )}
+                                      {env.semantiva && (
+                                        <div style={{ marginBottom: '4px', display: 'flex', alignItems: 'center' }}>
+                                          <strong style={{ marginRight: '8px', minWidth: '80px' }}>semantiva:</strong>
+                                          <span style={{ fontFamily: 'monospace', color: '#333' }}>{env.semantiva}</span>
+                                        </div>
+                                      )}
+                                      {fp && (
+                                        <div style={{ marginBottom: '4px', display: 'flex', alignItems: 'center' }}>
+                                          <strong style={{ marginRight: '8px', minWidth: '80px' }}>registry.fp:</strong>
+                                          <span style={{ fontFamily: 'monospace', color: '#333', fontSize: '11px' }} title={fp}>
+                                            {fp.length > 16 ? fp.slice(0, 16) + '...' : fp}
+                                          </span>
+                                          <button 
+                                            onClick={() => navigator.clipboard && navigator.clipboard.writeText(fp)} 
+                                            style={{ marginLeft: '6px', padding: '2px 4px', fontSize: '10px' }}
+                                          >
+                                            Copy
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <details style={{ marginTop: '6px', marginLeft: '12px' }}>
+                                      <summary style={{ cursor: 'pointer', fontSize: '12px', color: '#666' }}>View JSON</summary>
+                                      <pre style={{ marginTop: '4px', padding: '8px', background: '#f8f9fa', borderRadius: '4px', fontSize: '11px', overflow: 'auto', maxHeight: '200px' }}>
+                                        {JSON.stringify(env, null, 2)}
+                                      </pre>
+                                    </details>
+                                  </div>
+                                );
+                              })()
+                            )}
+
                                 {/* IO Delta */}
                             {rawData.io_delta && (
                               <div style={{ marginTop: '12px' }}>
@@ -1988,8 +2356,13 @@
                         );
                       })()}
                     </div>
-                  );
-                })()}
+                      );
+                    })() : (
+                      // Placeholder while traceMeta is refreshing; keep space to prevent jump
+                      <div style={{ padding: '8px', color: '#666', fontStyle: 'italic' }}>Refreshing trace…</div>
+                    )}
+                  </div>
+                )}
                 
                 {/* Errors Section */}
                 {nodeInfo.errors && nodeInfo.errors.length > 0 && (

@@ -83,6 +83,42 @@ semantiva-studio-viewer export-pipeline semantiva-imaging-pipeline.yaml \
   pipeline_with_trace.html --trace-jsonl traces/execution.ser.jsonl
 ```
 
+### Viewing Multiple Executions in One Trace File
+
+Studio now supports JSON/JSONL files that contain **multiple SER runs**.
+
+* Use `--trace-jsonl` to point to a combined file containing multiple execution runs.
+* A **Run** dropdown appears in the header (format: `run_id[:8] • started_at`).
+* Selecting a run updates the overlays and URL (`?run=<id>`).
+* Node detail panels now show **Run Args** (e.g., fan-out pins) and an **Environment** slice
+  (including `registry.fingerprint`) when present in SER.
+
+**Multi-run file formats supported:**
+* **JSONL format**: One SER record per line, multiple runs mixed together
+* **JSON array format**: Array of SER records from different runs
+
+**Example multi-run trace file (JSONL)**:
+```jsonl
+{"type":"ser","ids":{"run_id":"run-1","pipeline_id":"p"},"timing":{"start":"2025-01-01T00:00:01Z"},"status":"completed"}
+{"type":"ser","ids":{"run_id":"run-2","pipeline_id":"p"},"timing":{"start":"2025-01-01T00:00:03Z"},"status":"completed"}
+{"type":"ser","ids":{"run_id":"run-1","pipeline_id":"p"},"timing":{"start":"2025-01-01T00:00:05Z"},"status":"completed"}
+```
+
+**Run Args panel** displays fan-out parameters and other execution arguments:
+* `fanout.index`, `fanout.values`, `values_file_sha256`, etc.
+* Derived from `checks.why_ok.args` in SER records
+* Includes JSON view toggle for detailed inspection
+
+**Environment panel** shows execution environment details:
+* Python version, platform, Semantiva version
+* Registry fingerprint for reproducibility tracking
+* Derived from `checks.why_ok.env` in SER records
+
+**API support for multi-run traces:**
+* New endpoint: `GET /api/runs` lists available runs with metadata
+* All trace endpoints accept optional `?run=<run_id>` parameter
+* Backward compatible: single-run files work without any changes
+
 ---
 
 ## Components browser
