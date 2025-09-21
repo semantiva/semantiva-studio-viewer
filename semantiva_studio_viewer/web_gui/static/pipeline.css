@@ -55,7 +55,7 @@
       position: relative;
     }
     #details { 
-      width:375px; 
+      width:750px; 
       min-width: 200px;
       max-width: 800px;
       border-left:1px solid var(--neutral-border); 
@@ -814,3 +814,44 @@
         font-size: 14px;
       }
     }
+
+    /* New standardized card pieces reused by Trace cards */
+    .sv-card {
+      background: #fff;
+      border: 1px solid var(--neutral-border);
+      border-radius: 8px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+    .sv-card-title {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 8px 10px;
+      color: #374151;
+      background: #f9fafb;
+      border-bottom: 1px solid var(--neutral-border);
+    }
+    .sv-kv-grid {
+      display: block;
+      padding: 10px;
+      font-size: 12px;
+    }
+    .sv-kv-grid .kv {
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    .sv-kv-grid .k { color: #6b7280; }
+    .sv-kv-grid .v { color: #111827; word-break: break-word; }
+    .sv-kv-grid .v.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+
+    .pill { padding: 2px 6px; border-radius: 999px; font-size: 11px; border: 1px solid transparent; }
+    .pill.ok { background:#e6ffed; color:#065f46; border-color:#b7f7cc; }
+    .pill.bad { background:#ffeeee; color:#7f1d1d; border-color:#f9c2c2; }
+    .pill.warn { background:#fff7ed; color:#7c2d12; border-color:#fcd4a5; }
+    .pill-row { padding: 0 10px 8px 10px; display:flex; flex-wrap:wrap; gap:6px; }
+
+    .chip { display:inline-block; background:#eef2ff; color:#3730a3; border:1px solid #e0e7ff; border-radius: 6px; padding:1px 6px; margin-right:4px; margin-bottom:2px; font-size:11px; }
+    .sv-details { padding: 6px 10px 10px 10px; }
+    .sv-details > summary { cursor: pointer; color:#4b5563; font-size:12px; }
+    .sv-json { background:#f9fafb; border:1px solid var(--neutral-border); padding:8px; border-radius:6px; max-height:180px; overflow:auto; font-size:11px; }
+    .sv-subtitle { font-size:11px; color:#6b7280; padding: 0 10px; }
