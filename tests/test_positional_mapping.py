@@ -77,6 +77,10 @@ def make_fake_trace_index():
             # force positional mapping in tests
             return None
 
+        def get(self, run_id):
+            # For MultiSERIndex compatibility - return self for any run_id
+            return self
+
     return FakeIndex()
 
 

@@ -158,24 +158,6 @@ def sample_ser_file():
     Path(temp_path).unlink()
 
 
-def test_ser_file_detection(sample_ser_file):
-    """Test SER file detection function."""
-    from semantiva_studio_viewer.pipeline import _detect_ser_file
-
-    assert _detect_ser_file(sample_ser_file) is True
-
-    # Test with legacy trace file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        f.write('{"type": "pipeline_start", "schema_version": 0}\n')
-        f.write('{"type": "node", "phase": "before"}\n')
-        legacy_path = f.name
-
-    try:
-        assert _detect_ser_file(legacy_path) is False
-    finally:
-        Path(legacy_path).unlink()
-
-
 def test_pipeline_with_ser_trace(sample_pipeline_config, sample_ser_file):
     """Test pipeline API endpoints work with SER trace."""
     # Set up app state

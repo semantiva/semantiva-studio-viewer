@@ -15,7 +15,7 @@
 """Verify that all project files contain the license header and summarize failures."""
 
 import os
-
+import sys
 import re
 from typing import Iterable
 

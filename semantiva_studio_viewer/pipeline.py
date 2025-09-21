@@ -16,6 +16,7 @@
 
 import argparse
 import json
+from typing import Any
 from fastapi.encoders import jsonable_encoder
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
@@ -33,33 +34,7 @@ from semantiva.inspection import (
 app = FastAPI()
 
 
-def _detect_ser_file(file_path: str) -> bool:
-    """Detect if a JSONL file contains SER records.
-
-    Args:
-        file_path: Path to the JSONL file
-
-    Returns:
-        True if any line contains type: "ser", False otherwise
-    """
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            # Check first 10 lines for SER records
-            for i, line in enumerate(f):
-                if i >= 10:  # Don't check too many lines
-                    break
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                    if record.get("type") == "ser":
-                        return True
-                except json.JSONDecodeError:
-                    continue
-        return False
-    except Exception:
-        return False
+# Legacy trace detection removed - only SER format is supported
 
 
 def _ensure_trace_loaded():
@@ -73,27 +48,11 @@ def _ensure_trace_loaded():
     try:
         trace_file = Path(trace_path)
         if trace_file.exists() and trace_file.is_file():
-            # Auto-detect file format by checking for SER records
-            is_ser_file = _detect_ser_file(trace_path)
+            # Only SER format is supported
+            from .ser_index import MultiSERIndex
 
-            if is_ser_file:
-                # Prefer multi-run index; falls back to single SERIndex if only one run present
-                try:
-                    from .ser_index import MultiSERIndex
-
-                    app.state.trace_index = MultiSERIndex.from_json_or_jsonl(trace_path)
-                    print(f"Lazy-loaded multi-run SER file: {trace_path}")
-                except Exception:
-                    # Back-compat: load single SERIndex
-                    from .ser_index import SERIndex
-
-                    app.state.trace_index = SERIndex.from_jsonl(trace_path)
-                    print(f"Lazy-loaded single SER file: {trace_path}")
-            else:
-                from .trace_index import TraceIndex
-
-                app.state.trace_index = TraceIndex.from_jsonl(trace_path)
-                print(f"Lazy-loaded legacy trace file: {trace_path}")
+            app.state.trace_index = MultiSERIndex.from_json_or_jsonl(trace_path)
+            print(f"Lazy-loaded SER file: {trace_path}")
         app.state.trace_loaded = True
     except Exception as e:
         print(f"Warning: Failed to lazy-load trace file {trace_path}: {e}")
@@ -213,12 +172,11 @@ def _get_trace_index_for_run(run: str | None):
     ti = getattr(app.state, "trace_index", None)
     if ti is None:
         raise HTTPException(status_code=404, detail="No trace data available.")
-    if hasattr(ti, "get"):  # MultiSERIndex
-        try:
-            return ti.get(run)
-        except KeyError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-    return ti  # SERIndex
+    # ti is always MultiSERIndex now
+    try:
+        return ti.get(run)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.get("/api/runs")
@@ -232,19 +190,8 @@ def list_runs():
     ti = getattr(app.state, "trace_index", None)
     if ti is None:
         return []
-    if hasattr(ti, "list_runs"):
-        return ti.list_runs()
-    # Single-run fallback
-    meta = ti.get_meta()
-    return [
-        {
-            "run_id": meta.get("run_id"),
-            "pipeline_id": meta.get("pipeline_id"),
-            "started_at": meta.get("timing", {}).get("start") or meta.get("started_at"),
-            "ended_at": meta.get("timing", {}).get("end") or meta.get("ended_at"),
-            "total_events": meta.get("event_count", 0),
-        }
-    ]
+    # ti is always MultiSERIndex now
+    return ti.list_runs()
 
 
 @app.get("/")
@@ -440,42 +387,19 @@ def serve_pipeline(
             elif not trace_file.is_file():
                 print(f"Warning: Trace path is not a file: {trace_jsonl}")
             else:
-                # Auto-detect file format
-                is_ser_file = _detect_ser_file(trace_jsonl)
+                # Only SER format is supported
+                print(f"Loading SER file: {trace_jsonl}")
+                from .ser_index import MultiSERIndex
 
-                if is_ser_file:
-                    print(f"Loading SER file: {trace_jsonl}")
-                    # Prefer multi-run index; falls back to single SERIndex if only one run present
-                    try:
-                        from .ser_index import MultiSERIndex
-
-                        app.state.trace_index = MultiSERIndex.from_json_or_jsonl(
-                            trace_jsonl
-                        )
-                        runs = app.state.trace_index.list_runs()
-                        if len(runs) > 1:
-                            print(
-                                f"Multi-run SER data loaded: {len(runs)} runs ({len(app.state.trace_index.by_run)} indices)"
-                            )
-                        else:
-                            print(
-                                f"Single-run SER data loaded: {runs[0]['run_id'] if runs else 'unknown'}"
-                            )
-                    except Exception:
-                        # Back-compat: load single SERIndex
-                        from .ser_index import SERIndex
-
-                        app.state.trace_index = SERIndex.from_jsonl(trace_jsonl)
-                        print(
-                            f"SER data loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)"
-                        )
-                else:
-                    print(f"Loading legacy trace file: {trace_jsonl}")
-                    from .trace_index import TraceIndex
-
-                    app.state.trace_index = TraceIndex.from_jsonl(trace_jsonl)
+                app.state.trace_index = MultiSERIndex.from_json_or_jsonl(trace_jsonl)
+                runs = app.state.trace_index.list_runs()
+                if len(runs) > 1:
                     print(
-                        f"Trace loaded: {app.state.trace_index.run_id} ({len(app.state.trace_index.per_node)} nodes)"
+                        f"Multi-run SER data loaded: {len(runs)} runs ({len(app.state.trace_index.by_run)} indices)"
+                    )
+                else:
+                    print(
+                        f"Single-run SER data loaded: {runs[0]['run_id'] if runs else 'unknown'}"
                     )
                 app.state.trace_loaded = True
         except ImportError:
@@ -572,45 +496,30 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
         raise ValueError(f"Failed to load pipeline configuration: {e}")
 
     # Load trace data if provided
-    trace_data = {}
+    trace_data: dict[str, Any] = {}
     if trace_jsonl:
         try:
-            # Auto-detect file format
-            is_ser_file = _detect_ser_file(trace_jsonl)
+            # Only SER format is supported
+            print(f"Loading SER file for export: {trace_jsonl}")
+            from .ser_index import MultiSERIndex
 
-            if is_ser_file:
-                print(f"Loading SER file for export: {trace_jsonl}")
-                from .ser_index import MultiSERIndex
-
-                trace_index = MultiSERIndex.from_json_or_jsonl(trace_jsonl)
-            else:
-                print(f"Loading legacy trace file for export: {trace_jsonl}")
-                from .trace_index import TraceIndex
-
-                trace_index = TraceIndex.from_jsonl(trace_jsonl)
+            trace_index = MultiSERIndex.from_json_or_jsonl(trace_jsonl)
 
             # Build trace data for injection
-            runs_list = []
-            if hasattr(trace_index, "list_runs"):
-                runs_list = trace_index.list_runs()
-                print(f"Found {len(runs_list)} runs for export")
+            runs_list = trace_index.list_runs()
+            print(f"Found {len(runs_list)} runs for export")
 
-            # For MultiSERIndex, use the default run for initial metadata and mappings
-            default_run_id = None
+            # Get default run metadata and mappings
             if runs_list:
+                # Use default run
                 default_run_id = trace_index.default_run_id()
-                # Get the SERIndex for the default run
                 default_ser_index = trace_index.get(default_run_id)
                 trace_meta = default_ser_index.get_meta()
-                trace_summary = (
-                    trace_index.summary(default_run_id)
-                    if hasattr(trace_index, "summary")
-                    else default_ser_index.summary()
-                )
+                trace_summary = default_ser_index.summary()
             else:
-                # Single run case
-                trace_meta = trace_index.get_meta()
-                trace_summary = trace_index.summary()
+                # Empty MultiSERIndex - use empty data
+                trace_meta = {}
+                trace_summary = {}
 
             # Build positional label to UUID mapping using index_to_uuid
             pipeline_data = build_pipeline_json(config)
@@ -626,18 +535,24 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
                 if uuid:
                     label_to_uuid[node["label"]] = uuid
 
+            # Get available FQNs safely
+            available_fqns = []
+            if runs_list:
+                # Use default run's SERIndex
+                if hasattr(default_ser_index, "fqn_to_node_uuid"):
+                    available_fqns = list(default_ser_index.fqn_to_node_uuid.keys())
+            # If no runs, available_fqns stays empty list
+
             trace_mapping = {
                 "label_to_uuid": label_to_uuid,
                 "available_labels": [node["label"] for node in pipeline_data["nodes"]],
-                "available_fqns": list(
-                    (
-                        default_ser_index if runs_list else trace_index
-                    ).fqn_to_node_uuid.keys()
-                ),
+                "available_fqns": available_fqns,
                 "node_mappings": {
                     "index_to_uuid": index_to_uuid,
-                    "uuid_to_index": trace_meta.get("node_mappings", {}).get(
-                        "uuid_to_index", {}
+                    "uuid_to_index": (
+                        trace_meta.get("node_mappings", {}).get("uuid_to_index", {})
+                        if isinstance(trace_meta, dict)
+                        else {}
                     ),
                 },
             }
@@ -654,6 +569,7 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
 
             # Pre-compute metadata, summary, and mapping for each run
             if runs_list:
+                # MultiSERIndex case
                 for run_info in runs_list:
                     run_id = run_info["run_id"]
                     try:
@@ -662,18 +578,26 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
                         run_summary = run_ser_index.summary()
 
                         # Build run-specific mapping (should be same structure as default)
+                        run_available_fqns = []
+                        if hasattr(run_ser_index, "fqn_to_node_uuid"):
+                            run_available_fqns = list(
+                                run_ser_index.fqn_to_node_uuid.keys()
+                            )
+
                         run_mapping = {
                             "label_to_uuid": label_to_uuid,  # Same for all runs
                             "available_labels": [
                                 node["label"] for node in pipeline_data["nodes"]
                             ],
-                            "available_fqns": list(
-                                run_ser_index.fqn_to_node_uuid.keys()
-                            ),
+                            "available_fqns": run_available_fqns,
                             "node_mappings": {
                                 "index_to_uuid": index_to_uuid,
-                                "uuid_to_index": run_meta.get("node_mappings", {}).get(
-                                    "uuid_to_index", {}
+                                "uuid_to_index": (
+                                    run_meta.get("node_mappings", {}).get(
+                                        "uuid_to_index", {}
+                                    )
+                                    if isinstance(run_meta, dict)
+                                    else {}
                                 ),
                             },
                         }
@@ -690,10 +614,9 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
 
             # Pre-load events for all mapped nodes across all runs
             # Structure: trace_data["node_events"][run_id][uuid] = events
-            trace_data["node_events"] = {}
 
             if runs_list:
-                # Multi-run: load events for each run
+                # MultiSERIndex case: load events for each run
                 for run_info in runs_list:
                     run_id = run_info["run_id"]
                     trace_data["node_events"][run_id] = {}
@@ -716,14 +639,17 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
                     except Exception as e:
                         print(f"Warning: Failed to get SERIndex for run {run_id}: {e}")
             else:
-                # Single run: keep existing structure for backward compatibility
-                for label, uuid in label_to_uuid.items():
-                    events_response = trace_index.node_events(uuid, offset=0, limit=100)
-                    trace_data["node_events"][uuid] = events_response
+                # Empty MultiSERIndex: no runs to load events from
+                pass
 
-            data_source = "SER" if is_ser_file else "legacy trace"
+            data_source = "SER"
+            run_id_str = (
+                trace_meta.get("run_id", "unknown")
+                if isinstance(trace_meta, dict)
+                else "unknown"
+            )
             print(
-                f"Trace data loaded from {data_source}: {trace_meta['run_id']} ({len(label_to_uuid)} nodes mapped)"
+                f"Trace data loaded from {data_source}: {run_id_str} ({len(label_to_uuid)} nodes mapped)"
             )
 
         except Exception as e:
