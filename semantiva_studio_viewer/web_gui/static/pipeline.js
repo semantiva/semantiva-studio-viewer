@@ -1138,7 +1138,7 @@
 
       // Resizable panels
       const sidebar = useResizable(400, 200, 600);
-  const details = useResizableRight(750, 200, 10000);
+  const details = useResizableRight(700, 200, 10000);
 
       // Wrap fetch helper for trace endpoints
       const traceFetch = (path) => {

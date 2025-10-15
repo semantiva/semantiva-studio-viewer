@@ -362,9 +362,10 @@ def serve_pipeline(
 
     # Initialize core Semantiva components before loading configuration
     # This ensures that built-in processors like FloatMultiplyOperation are registered
-    from semantiva.registry.class_registry import ClassRegistry
+    from semantiva.registry import ProcessorRegistry, apply_profile, RegistryProfile
 
-    ClassRegistry.initialize_default_modules()
+    # Apply the default registry profile to load built-in modules
+    apply_profile(RegistryProfile())
 
     try:
         # Load the pipeline configuration (doesn't create Pipeline object)
@@ -486,9 +487,10 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
 
     # Initialize core Semantiva components before loading configuration
     # This ensures that built-in processors are available during export
-    from semantiva.registry.class_registry import ClassRegistry
+    from semantiva.registry import ProcessorRegistry, apply_profile, RegistryProfile
 
-    ClassRegistry.initialize_default_modules()
+    # Apply the default registry profile to load built-in modules
+    apply_profile(RegistryProfile())
 
     try:
         config = load_pipeline_from_yaml(yaml_path)

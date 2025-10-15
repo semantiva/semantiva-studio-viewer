@@ -90,7 +90,7 @@ Studio now supports JSON/JSONL files that contain **multiple SER runs**.
 * Use `--trace-jsonl` to point to a combined file containing multiple execution runs.
 * A **Run** dropdown appears in the header (format: `run_id[:8] • started_at`).
 * Selecting a run updates the overlays and URL (`?run=<id>`).
-* Node detail panels now show **Run Args** (e.g., fan-out pins) and an **Environment** slice
+* Node detail panels now show **Run Args** (e.g., run-space pins) and an **Environment** slice
   (including `registry.fingerprint`) when present in SER.
 
 **Multi-run file formats supported:**
@@ -104,7 +104,7 @@ Studio now supports JSON/JSONL files that contain **multiple SER runs**.
 {"type":"ser","ids":{"run_id":"run-1","pipeline_id":"p"},"timing":{"start":"2025-01-01T00:00:05Z"},"status":"completed"}
 ```
 
-**Run Args panel** displays fan-out parameters and other execution arguments:
+**Run Args panel** displays run-space parameters and other execution arguments:
 * `fanout.index`, `fanout.values`, `values_file_sha256`, etc.
 * Derived from `checks.why_ok.args` in SER records
 * Includes JSON view toggle for detailed inspection
