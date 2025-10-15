@@ -130,7 +130,7 @@ class TraceIndex:
                         try:
                             record = json.loads(block_text)
                             index.total_events += 1
-                            record_type = record.get("type")
+                            record_type = record.get("record_type")
 
                             if record_type == "pipeline_start":
                                 index._process_pipeline_start(record)
@@ -157,7 +157,7 @@ class TraceIndex:
                     try:
                         record = json.loads(block_text)
                         index.total_events += 1
-                        record_type = record.get("type")
+                        record_type = record.get("record_type")
                         if record_type == "pipeline_start":
                             index._process_pipeline_start(record)
                         elif record_type == "node":

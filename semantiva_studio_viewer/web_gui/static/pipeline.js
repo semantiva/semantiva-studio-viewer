@@ -210,63 +210,63 @@
     }
 
     // Helper extractors for SER raw event data used by the Trace cards
-    function extractInputSummaries(raw, evBefore=null) {
+    function extractInputSummaries(raw) {
       const s = (raw && raw.summaries) || {};
-      const io = (raw && raw.io_delta) || {};
-      const ioSum = io.summaries || {};
+      const io = (raw && raw.context_delta) || {};
+      const ioSum = io.key_summaries || {};
       const find = (k) => s[k] || ioSum[k] || null;
       const input = find('input_data');
       const preCtx = find('pre_context');
       return {
         dataType: (input && (input.dtype || input.type)) || undefined,
-        dataRepr: (input && input.repr) || (evBefore && evBefore.in_data_repr) || undefined,
+        dataRepr: (input && input.repr) || undefined,
         dataHash: input && input.sha256,
-        ctxRepr: (preCtx && preCtx.repr) || (evBefore && evBefore.pre_context_repr) || undefined,
+        ctxRepr: (preCtx && preCtx.repr) || undefined,
         ctxHash: preCtx && preCtx.sha256,
       };
     }
 
-    function extractOutputSummaries(raw, evAfter=null) {
+    function extractOutputSummaries(raw) {
       const s = (raw && raw.summaries) || {};
-      const io = (raw && raw.io_delta) || {};
-      const ioSum = io.summaries || {};
+      const io = (raw && raw.context_delta) || {};
+      const ioSum = io.key_summaries || {};
       const find = (k) => s[k] || ioSum[k] || null;
       const output = find('output_data');
       const postCtx = find('post_context');
       return {
         dataType: (output && (output.dtype || output.type)) || undefined,
-        dataRepr: (output && output.repr) || (evAfter && evAfter.out_data_repr) || undefined,
+        dataRepr: (output && output.repr) || undefined,
         dataHash: output && output.sha256,
-        ctxRepr: (postCtx && postCtx.repr) || (evAfter && evAfter.post_context_repr) || undefined,
+        ctxRepr: (postCtx && postCtx.repr) || undefined,
         ctxHash: postCtx && postCtx.sha256,
       };
     }
 
     function extractContextDelta(raw) {
-      const io = (raw && raw.io_delta) || {};
-      const sums = io.summaries || {};
+      const io = (raw && raw.context_delta) || {};
+      const sums = io.key_summaries || {};
       const mk = (x) => Array.isArray(x) ? x : (x ? [x] : []);
-      const created = mk(io.created);
-      const updated = mk(io.updated);
-      const read = mk(io.read);
+      const created = mk(io.created_keys);
+      const updated = mk(io.updated_keys);
+      const read = mk(io.read_keys);
       return { created, updated, read, summariesByKey: sums };
     }
 
     function extractExecMeta(raw) {
-      const ids = (raw && raw.ids) || {};
+      const ids = (raw && raw.identity) || {};
       const timing = (raw && raw.timing) || {};
-      const ok = (raw && raw.checks && raw.checks.why_ok) || {};
+      const assertions = (raw && raw.assertions) || {};
       return {
         node_uuid: ids.node_id || (raw && (raw.node_uuid || raw.node_id)) || '—',
   node_index: (raw && raw.node_index) != null ? raw.node_index : '—',
-        started: timing.start || '—',
-        ended: timing.end || '—',
+        started: timing.started_at || '—',
+        ended: timing.finished_at || '—',
         status: (raw && raw.status) || '—',
   // Normalize timings: prefer ms fields, fall back to seconds fields converted to ms
   wall: (timing.duration_ms != null) ? `${timing.duration_ms} ms` : (timing.duration_s != null ? `${Math.round(Number(timing.duration_s) * 1000)} ms` : (timing.duration != null ? `${Math.round(Number(timing.duration) * 1000)} ms` : '—')),
   cpu: (timing.cpu_ms != null) ? `${timing.cpu_ms} ms` : (timing.cpu_s != null ? `${Math.round(Number(timing.cpu_s) * 1000)} ms` : (timing.cpu != null ? `${Math.round(Number(timing.cpu) * 1000)} ms` : '—')),
-        env: ok.env || null,
-        runArgs: ok.args || null,
+        env: assertions.environment || null,
+        runArgs: assertions.args || null,
       };
     }
 
@@ -303,8 +303,8 @@
       );
     }
 
-    function TraceInputCard({ raw, evBefore=null, paramProvenanceRenderer=null }) {
-      const s = extractInputSummaries(raw, evBefore);
+    function TraceInputCard({ raw, paramProvenanceRenderer=null }) {
+      const s = extractInputSummaries(raw);
       return (
         <div className="sv-card">
           <div className="sv-card-title">Input</div>
@@ -325,8 +325,8 @@
       );
     }
 
-    function TraceOutputCard({ raw, evAfter=null }) {
-      const s = extractOutputSummaries(raw, evAfter);
+    function TraceOutputCard({ raw }) {
+      const s = extractOutputSummaries(raw);
       const d = extractContextDelta(raw);
       const ChipList = ({ label, items }) => (
         <div className="kv">
@@ -384,8 +384,9 @@
     }
 
     function TraceChecksCard({ raw }) {
-      const run = (raw && raw.checks && raw.checks.why_run) || {};
-      const ok = (raw && raw.checks && raw.checks.why_ok) || {};
+      const assertions = (raw && raw.assertions) || {};
+      const preconditions = assertions.preconditions || [];
+      const postconditions = assertions.postconditions || [];
       const Pills = ({ title, items }) => {
         if (!items || !items.length) return null;
         return (
@@ -404,9 +405,9 @@
       return (
         <div className="sv-card">
           <div className="sv-card-title">SER Checks</div>
-          <Pills title="Pre-execution" items={run.pre} />
-          <Pills title="Post-execution" items={ok.post} />
-          <Pills title="Invariants" items={ok.invariants} />
+          <Pills title="Pre-execution" items={preconditions} />
+          <Pills title="Post-execution" items={postconditions} />
+          <Pills title="Invariants" items={assertions.invariants} />
         </div>
       );
     }
@@ -2122,33 +2123,33 @@
                     return runMap.get(nodeUuid) || [];
                   })();
 
-                  // Bucket latest before/after/error events
-                  const bucket = { before: null, after: null, error: null };
-                  nodeEvents.forEach(ev => {
-                    if (ev.phase === 'before') bucket.before = ev;
-                    else if (ev.phase === 'after') bucket.after = ev;
-                    else if (ev.phase === 'error') bucket.error = ev;
-                  });
+                  // SER v1: Single event per execution (not before/after bucketing)
+                  // Get the most recent event (should be only one per execution)
+                  const latestEvent = nodeEvents.length > 0 ? nodeEvents[nodeEvents.length - 1] : null;
+                  
+                  // Extract data from the event
+                  const rawData = latestEvent && latestEvent._raw;
+                  const timing = (rawData && rawData.timing) || {};
+                  const status_from_raw = (rawData && rawData.status) || 'unknown';
+                  
+                  // Determine display status
+                  let status = 'Unknown';
+                  if (latestEvent) {
+                    if (latestEvent.phase === 'error') {
+                      status = 'Error';
+                    } else if (latestEvent.phase === 'completed' || status_from_raw === 'succeeded') {
+                      status = 'Completed';
+                    }
+                  }
 
-                  // Derive timestamps and status
-                  const started = bucket.before ? bucket.before.event_time_utc : undefined;
-                  const ended = bucket.after ? bucket.after.event_time_utc : (bucket.error ? bucket.error.event_time_utc : undefined);
-                  let status = 'Started';
-                  if (bucket.after) status = 'Completed';
-                  else if (bucket.error) status = 'Error';
-                  // Build four-card layout based on selected event raw
-                  const serEvent = bucket.after || bucket.error || bucket.before;
-                  const rawData = serEvent && serEvent._raw;
                   const metaOverrides = {
                     node_uuid: nodeUuid || '—',
                     node_index: canonicalInfo ? (canonicalInfo.declaration_index + 1) : '—',
-                    started: started || '—',
-                    ended: ended || '—',
+                    started: timing.started_at || '—',
+                    ended: timing.finished_at || '—',
                     status: status,
-                    // keep wall/cpu from old structure if present (convert seconds -> milliseconds)
-                    wall: (bucket.after && (bucket.after.t_wall != null)) ? `${Math.round(Number(bucket.after.t_wall) * 1000)} ms` : undefined,
-                    cpu: (bucket.after && (bucket.after.t_cpu != null)) ? `${Math.round(Number(bucket.after.t_cpu) * 1000)} ms` : undefined,
                   };
+                  // Don't override wall/cpu - let extractExecMeta get them from _raw
 
                   // Renderer for parameter provenance (moved into Input card)
                   const renderParamProvenance = () => {
@@ -2238,11 +2239,11 @@
 
                   return (
                     <div>
-                      {rawData && rawData.type === 'ser' ? (
+                      {rawData && rawData.record_type === 'ser' ? (
                         <React.Fragment>
                           <TraceExecutionCard raw={rawData} metaOverrides={metaOverrides} />
-                          <TraceInputCard raw={rawData} evBefore={bucket.before} paramProvenanceRenderer={renderParamProvenance} />
-                          <TraceOutputCard raw={rawData} evAfter={bucket.after} />
+                          <TraceInputCard raw={rawData} paramProvenanceRenderer={renderParamProvenance} />
+                          <TraceOutputCard raw={rawData} />
                           <TraceChecksCard raw={rawData} />
                         </React.Fragment>
                       ) : (
@@ -2252,28 +2253,22 @@
                         </React.Fragment>
                       )}
 
-                      {/* Error summary kept as separate alert below cards */}
-                      {bucket.error && (
+                      {/* Error summary if event is error */}
+                      {latestEvent && latestEvent.phase === 'error' && (
                         <div style={{ marginTop: '8px', padding: '10px', border: '1px solid #f8d7da', background: '#fff5f6', borderRadius: '6px' }}>
-                          <div className="trace-item"><strong>Error Type:</strong> {bucket.error.error_type}</div>
-                          {bucket.error.error_msg && (
-                            <div className="trace-item" title={bucket.error.error_msg}>
-                              <strong>Message:</strong> {String(bucket.error.error_msg).split('\n')[0]} 
-                              <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(bucket.error.error_msg)} style={{ marginLeft: '6px' }}>Copy</button>
+                          <div className="trace-item"><strong>Error Type:</strong> {latestEvent.error_type}</div>
+                          {latestEvent.error_msg && (
+                            <div className="trace-item" title={latestEvent.error_msg}>
+                              <strong>Message:</strong> {String(latestEvent.error_msg).split('\n')[0]} 
+                              <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(latestEvent.error_msg)} style={{ marginLeft: '6px' }}>Copy</button>
                             </div>
                           )}
-                          {bucket.error._raw && bucket.error._raw.traceback && (
+                          {rawData && rawData.traceback && (
                             <div style={{ marginTop: '6px' }}>
                               <div className="trace-item"><strong>Traceback:</strong></div>
-                              <pre style={{ maxHeight: '8em', overflow: 'auto', fontFamily: 'monospace', background: '#fff', padding: '8px', borderRadius: '4px', marginTop: '4px' }}>{bucket.error._raw.traceback}</pre>
+                              <pre style={{ maxHeight: '8em', overflow: 'auto', fontFamily: 'monospace', background: '#fff', padding: '8px', borderRadius: '4px', marginTop: '4px' }}>{rawData.traceback}</pre>
                             </div>
                           )}
-                        </div>
-                      )}
-
-                      {!bucket.after && !bucket.error && bucket.before && (
-                        <div style={{ marginTop: '8px', padding: '10px', border: '1px solid #eef4ff', background: '#fbfdff', borderRadius: '6px' }}>
-                          <div className="trace-item">Node execution has started but no completion or error event recorded yet.</div>
                         </div>
                       )}
                     </div>

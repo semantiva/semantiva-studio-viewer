@@ -100,9 +100,9 @@ class SERIndex:
                     try:
                         record = json.loads(line)
                         index.total_events += 1
-                        record_type = record.get("type")
+                        record_type = record.get("record_type")
 
-                        # Handle legacy trace records if mixed with SER
+                        # Handle trace records
                         if record_type == "pipeline_start":
                             index._process_pipeline_start(record)
                         elif record_type == "pipeline_end":
@@ -144,18 +144,18 @@ class SERIndex:
             nodes = canonical_spec.get("nodes", [])
             for node in nodes:
                 node_uuid = node.get("node_uuid")
-                fqn = node.get("fqn")
+                processor_ref = node.get("processor_ref")
                 if node_uuid:
                     self.canonical_nodes[node_uuid] = {
                         "node_uuid": node_uuid,
-                        "fqn": fqn,
+                        "fqn": processor_ref,
                         "declaration_index": node.get("declaration_index"),
                         "declaration_subindex": node.get("declaration_subindex"),
                         "role": node.get("role"),
                     }
-                if node_uuid and fqn:
-                    self.node_uuid_to_fqn[node_uuid] = fqn
-                    self.fqn_to_node_uuid[fqn] = node_uuid
+                if node_uuid and processor_ref:
+                    self.node_uuid_to_fqn[node_uuid] = processor_ref
+                    self.fqn_to_node_uuid[processor_ref] = node_uuid
 
     def _process_pipeline_end(self, record: Dict[str, Any]) -> None:
         """Process legacy pipeline_end record for backward compatibility."""
@@ -167,8 +167,8 @@ class SERIndex:
     ) -> None:
         """Process SER record and synthesize trace events."""
         try:
-            ids = record.get("ids", {})
-            node_id = ids.get("node_id")
+            identity = record.get("identity", {})
+            node_id = identity.get("node_id")
 
             if not node_id:
                 self.warnings.append("SER record missing node_id")
@@ -176,40 +176,40 @@ class SERIndex:
 
             # Set run/pipeline IDs from first SER record
             if not self.run_id:
-                self.run_id = ids.get("run_id")
+                self.run_id = identity.get("run_id")
             if not self.pipeline_id:
-                self.pipeline_id = ids.get("pipeline_id")
+                self.pipeline_id = identity.get("pipeline_id")
 
             # Store node info for graph reconstruction
-            labels = record.get("labels", {})
-            node_fqn = labels.get("node_fqn")
+            tags = record.get("tags", {})
+            node_fqn = tags.get("node_ref")
             if not node_fqn:
-                # Fall back to action.op_ref if no FQN
-                action = record.get("action", {})
-                node_fqn = action.get("op_ref", node_id[:8])
+                # Fall back to processor.ref if no FQN in tags
+                processor = record.get("processor", {})
+                node_fqn = processor.get("ref", node_id[:8])
 
             # Update mappings
             if node_fqn:
                 self.node_uuid_to_fqn[node_id] = node_fqn
                 self.fqn_to_node_uuid[node_fqn] = node_id
 
-            # Store canonical node info with labels, preserving existing data if available
+            # Store canonical node info with tags, preserving existing data if available
             existing_canonical = self.canonical_nodes.get(node_id, {})
 
             # Preserve declaration_index and declaration_subindex from pipeline_start if available
             preserved_di = existing_canonical.get("declaration_index")
             preserved_dsub = existing_canonical.get("declaration_subindex", 0)
 
-            # Only use labels data if we don't have preserved values
+            # Only use tags data if we don't have preserved values
             final_di = (
                 preserved_di
                 if preserved_di is not None
-                else labels.get("declaration_index")
+                else tags.get("declaration_index")
             )
             final_dsub = (
                 preserved_dsub
                 if preserved_dsub is not None
-                else labels.get("declaration_subindex", 0)
+                else tags.get("declaration_subindex", 0)
             )
 
             self.canonical_nodes[node_id] = {
@@ -217,18 +217,18 @@ class SERIndex:
                 "fqn": node_fqn,
                 "declaration_index": final_di,
                 "declaration_subindex": final_dsub,
-                "role": existing_canonical.get("role") or labels.get("role"),
+                "role": existing_canonical.get("role") or tags.get("role"),
             }
 
-            # Store topology for graph reconstruction
-            topology = record.get("topology", {})
-            upstream = topology.get("upstream", [])
+            # Store dependencies for graph reconstruction
+            dependencies = record.get("dependencies", {})
+            upstream = dependencies.get("upstream", [])
             self._nodes_by_id[node_id] = {
                 "node_id": node_id,
                 "fqn": node_fqn,
                 "upstream": upstream,
-                "labels": labels,
-                "action": record.get("action", {}),
+                "tags": tags,
+                "processor": record.get("processor", {}),
             }
 
             # Add edges
@@ -242,62 +242,56 @@ class SERIndex:
 
             agg = self.per_node[node_id]
             timing = record.get("timing", {})
-            status = record.get("status", "completed")
+            status = record.get("status", "succeeded")
 
             # Extract timing info
-            start_time = timing.get("start", "")
-            end_time = timing.get("end", "")
+            start_time = timing.get("started_at", "")
+            end_time = timing.get("finished_at", "")
             duration_ms = timing.get("duration_ms", 0)
             t_wall = duration_ms / 1000.0 if duration_ms else 0.0
 
-            # Synthesize "before" event
-            before_event = TraceEvent(
-                phase="before", event_time_utc=start_time, _raw=record
+            # SER v1: Create single event per execution (not before/after)
+            # Extract data summaries
+            summaries = record.get("summaries", {})
+            context_delta = record.get("context_delta", {})
+            
+            out_data_hash = self._extract_data_hash(
+                summaries, context_delta, "output_data", "created_keys"
             )
-            self._add_event(node_id, before_event, max_events_per_node)
-            agg.count_before += 1
+            out_data_repr = self._extract_data_repr(summaries, "output_data")
+            post_context_hash = self._extract_context_hash(summaries)
+            post_context_repr = self._extract_context_repr(summaries)
 
-            # Synthesize "after" or "error" event
+            # Extract CPU time (ms -> seconds) when available
+            t_cpu = (
+                (timing.get("cpu_ms") / 1000.0)
+                if timing.get("cpu_ms") is not None
+                else None
+            )
+
+            # Create single event with complete execution data
             if status == "error":
                 error_info = record.get("error", {})
-                error_event = TraceEvent(
+                event = TraceEvent(
                     phase="error",
                     event_time_utc=end_time,
                     t_wall=t_wall,
-                    t_cpu=(
-                        (timing.get("cpu_ms") / 1000.0)
-                        if timing.get("cpu_ms") is not None
-                        else None
-                    ),
+                    t_cpu=t_cpu,
                     error_type=error_info.get("type", "Error"),
                     error_msg=error_info.get("message", ""),
+                    out_data_hash=out_data_hash,
+                    out_data_repr=out_data_repr,
+                    post_context_hash=post_context_hash,
+                    post_context_repr=post_context_repr,
                     _raw=record,
                 )
-                self._add_event(node_id, error_event, max_events_per_node)
                 agg.count_error += 1
                 agg.last_error_type = error_info.get("type")
                 agg.last_error_msg = error_info.get("message")
+                agg.last_phase = "error"
             else:
-                # Synthesize output data hash and repr from summaries
-                summaries = record.get("summaries", {})
-                io_delta = record.get("io_delta", {})
-
-                out_data_hash = self._extract_data_hash(
-                    summaries, io_delta, "output_data", "created"
-                )
-                out_data_repr = self._extract_data_repr(summaries, "output_data")
-                post_context_hash = self._extract_context_hash(summaries)
-                post_context_repr = self._extract_context_repr(summaries)
-
-                # Extract CPU time (ms -> seconds) when available
-                t_cpu = (
-                    (timing.get("cpu_ms") / 1000.0)
-                    if timing.get("cpu_ms") is not None
-                    else None
-                )
-
-                after_event = TraceEvent(
-                    phase="after",
+                event = TraceEvent(
+                    phase="completed",
                     event_time_utc=end_time,
                     t_wall=t_wall,
                     t_cpu=t_cpu,
@@ -307,13 +301,12 @@ class SERIndex:
                     post_context_repr=post_context_repr,
                     _raw=record,
                 )
-                self._add_event(node_id, after_event, max_events_per_node)
                 agg.count_after += 1
                 if t_wall:
                     agg.t_wall_sum += t_wall
+                agg.last_phase = "completed"
 
-            # Update aggregate info
-            agg.last_phase = "error" if status == "error" else "after"
+            self._add_event(node_id, event, max_events_per_node)
             agg.last_event_time_utc = end_time
 
         except Exception as e:
@@ -329,7 +322,7 @@ class SERIndex:
         events_list.append(event)
 
     def _extract_data_hash(
-        self, summaries: Dict, io_delta: Dict, summary_key: str, delta_key: str
+        self, summaries: Dict, context_delta: Dict, summary_key: str, delta_key: str
     ) -> Optional[str]:
         """Extract data hash from summaries or compute from created keys."""
         # Try direct summary
@@ -338,8 +331,9 @@ class SERIndex:
             if isinstance(summary, dict) and "sha256" in summary:
                 return summary["sha256"]
 
-        # Try first created key from io_delta
-        created = io_delta.get(delta_key, [])
+        # Try first created key from context_delta
+        created = context_delta.get(delta_key, [])
+            
         if created and len(created) > 0:
             first_key = created[0]
             # Look for summary of first created key
@@ -586,15 +580,21 @@ class MultiSERIndex:
         def _touch_meta(run_id: str, record: Dict[str, Any]) -> None:
             meta = inst.meta_by_run[run_id]
             # pipeline_id
-            pid = (record.get("ids") or {}).get("pipeline_id") or record.get(
-                "pipeline_id"
+            pid = (
+                # SER v1: record.identity.pipeline_id
+                (record.get("identity") or {}).get("pipeline_id")
+                # SER v0: record.ids.pipeline_id
+                or (record.get("ids") or {}).get("pipeline_id") 
+                # pipeline_start/end: record.pipeline_id
+                or record.get("pipeline_id")
             )
             if pid and not meta.pipeline_id:
                 meta.pipeline_id = pid
             # started_at / ended_at from timing if present
             timing = record.get("timing") or {}
-            st = timing.get("start")
-            en = timing.get("end")
+            # SER v1: timing.started_at, timing.finished_at
+            st = timing.get("started_at") or timing.get("start")
+            en = timing.get("finished_at") or timing.get("end")
             if st and (not meta.started_at or st < meta.started_at):
                 meta.started_at = st
             if en and (not meta.ended_at or en > meta.ended_at):
@@ -602,7 +602,7 @@ class MultiSERIndex:
             meta.total_events += 1
 
         def _route_record(index: SERIndex, record: Dict[str, Any]) -> None:
-            rtype = record.get("type")
+            rtype = record.get("record_type")
             if rtype == "ser":
                 index._process_ser_record(record, max_events_per_node=500)
             elif rtype == "pipeline_start":
@@ -628,7 +628,11 @@ class MultiSERIndex:
 
         def _dispatch(record: Dict[str, Any]) -> None:
             run_id = (
-                (record.get("ids") or {}).get("run_id")
+                # SER v1: record.identity.run_id
+                (record.get("identity") or {}).get("run_id")
+                # SER v0: record.ids.run_id  
+                or (record.get("ids") or {}).get("run_id")
+                # pipeline_start/end: record.run_id
                 or record.get("run_id")
                 or "unknown"
             )
