@@ -1571,23 +1571,34 @@
           if (!chosen) { for (const ev of nodeEvents) { if (ev.status === 'error') { chosen = ev; break; } } }
           if (!chosen) chosen = nodeEvents[0];
           const rawData = chosen && chosen._raw;
-          if (!rawData || rawData.type !== 'ser') return undefined;
+          if (!rawData || rawData.record_type !== 'ser') return undefined;
 
           if (type === 'param') {
-            if (!rawData.action || !rawData.action.params) return undefined;
-            let pval = rawData.action.params[name];
-            if (pval === undefined) pval = rawData.action.params[name && name.toString ? name.toString() : name];
+            if (!rawData.processor || !rawData.processor.parameters) return undefined;
+            let pval = rawData.processor.parameters[name];
+            if (pval === undefined) pval = rawData.processor.parameters[name && name.toString ? name.toString() : name];
             if (pval === undefined) return undefined;
             if (pval && typeof pval === 'object') {
               if (pval.repr) return String(pval.repr);
               try { return JSON.stringify(pval); } catch (e) { return String(pval); }
             }
-            try { return String(pval); } catch (e) { return ''; }
+            // Preserve float representation for numbers
+            if (typeof pval === 'number') {
+              const repr = Number.isInteger(pval) && pval % 1 === 0 ? pval.toFixed(1) : String(pval);
+              return repr.length > 40 ? repr.substring(0, 40) + '...' : repr;
+            }
+            try { 
+              const repr = String(pval);
+              return repr.length > 40 ? repr.substring(0, 40) + '...' : repr;
+            } catch (e) { 
+              return ''; 
+            }
           }
 
           if (type === 'created') {
-            const summaries = (rawData.io_delta && rawData.io_delta.summaries) || rawData.summaries || {};
-            const s = summaries[name] || summaries[name && name.toString ? name.toString() : name];
+            // Look for created keys in context_delta.key_summaries
+            const keySummaries = (rawData.context_delta && rawData.context_delta.key_summaries) || {};
+            const s = keySummaries[name] || keySummaries[name && name.toString ? name.toString() : name];
             if (s && (s.repr || s.sample || s.preview)) return String(s.repr || s.sample || s.preview);
             return undefined;
           }
@@ -2089,7 +2100,7 @@
                             <strong>Requires:</strong> {nodeInfo.required_keys.join(', ')}
                           </div>
                         )}
-                        {(!traceAvailable) && hasCreatedKeys && (
+                        {hasCreatedKeys && (
                           <div className="trace-item">
                             <strong>Produces:</strong> {nodeInfo.created_keys.join(', ')}
                           </div>
@@ -2219,22 +2230,21 @@
                               // Try to get parameter value from SER raw data if available
                               let valueRepr = '';
                               try {
-                                const currentNode = nodeMap && selectedNodeId ? nodeMap[parseInt(selectedNodeId)] : null;
-                                if (currentNode && traceLabelToUuid && currentNode.label) {
-                                  const nodeUuid = currentNode.node_uuid || traceLabelToUuid.get(currentNode.label);
-                                  if (nodeUuid) {
-                                    const runMap = nodeTraceEvents.get(currentRun) || new Map();
-                                    const nodeEvents = runMap.get(nodeUuid) || [];
-                                    const serEvent = nodeEvents.find(ev => ev._raw && ev._raw.type === 'ser');
-                                    if (serEvent && serEvent._raw.action && serEvent._raw.action.params) {
-                                      const paramValue = serEvent._raw.action.params[key];
-                                      if (paramValue !== undefined) {
-                                        if (typeof paramValue === 'object' && paramValue.repr) {
-                                          valueRepr = paramValue.repr;
-                                        } else {
-                                          valueRepr = String(paramValue);
-                                        }
-                                      }
+                                if (rawData && rawData.processor && rawData.processor.parameters) {
+                                  const paramValue = rawData.processor.parameters[key];
+                                  if (paramValue !== undefined) {
+                                    if (typeof paramValue === 'object' && paramValue.repr) {
+                                      valueRepr = paramValue.repr;
+                                    } else if (typeof paramValue === 'number') {
+                                      // Preserve float representation
+                                      valueRepr = Number.isInteger(paramValue) && paramValue % 1 === 0 ? 
+                                        paramValue.toFixed(1) : String(paramValue);
+                                    } else {
+                                      valueRepr = String(paramValue);
+                                    }
+                                    // Cap at 40 characters
+                                    if (valueRepr.length > 40) {
+                                      valueRepr = valueRepr.substring(0, 40) + '...';
                                     }
                                   }
                                 }
