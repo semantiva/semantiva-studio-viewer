@@ -609,6 +609,30 @@
       color: var(--neutral-primary);
     }
 
+    /* Invalid parameter styling */
+    .trace-item-invalid {
+      background: #fee;
+      border-left: 3px solid #dc3545;
+      padding: 8px;
+      border-radius: 4px;
+      margin: 8px 0;
+    }
+
+    .trace-item-invalid strong {
+      color: #dc3545;
+    }
+
+    .invalid-param-badge {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 6px;
+      background: #dc3545;
+      color: white;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
     /* Mobile Responsive Styles */
     @media (max-width: 768px) {
       /* Override the main container's inline flex styles */

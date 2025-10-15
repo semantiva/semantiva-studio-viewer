@@ -1999,46 +1999,59 @@
                     {nodeInfo.parameter_resolution && nodeInfo.parameter_resolution.required_params && 
                       nodeInfo.parameter_resolution.required_params.length > 0 ? (
                       <div>
-                        {Object.keys(nodeInfo.parameter_resolution.from_pipeline_config || {}).length > 0 && (
-                          <div className="prov-box prov-box-config">
-                            <div className="prov-header">From Pipeline Configuration:</div>
-                            {Object.entries(nodeInfo.parameter_resolution.from_pipeline_config).map(([key, details]) => (
-                              <div key={key} className="trace-item">
-                                <strong>{key}:</strong> {typeof details === 'object' && details.value !== undefined ? details.value + (details.source === 'default' ? ' [default]' : '') : details}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {Object.keys(nodeInfo.parameter_resolution.from_processor_defaults || {}).length > 0 && (
-                          <div className="prov-box prov-box-default">
-                            <div className="prov-header">From Processor Defaults:</div>
-                            {Object.entries(nodeInfo.parameter_resolution.from_processor_defaults).map(([key, details]) => (
-                              <div key={key} className="trace-item">
-                                <strong>{key}:</strong> {typeof details === 'object' && details.value !== undefined ? details.value : details}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {Object.keys(nodeInfo.parameter_resolution.from_context || {}).length > 0 && (
-                          <div className="prov-box prov-box-context">
-                            <div className="prov-header">From Context:</div>
-                            {Object.entries(nodeInfo.parameter_resolution.from_context).map(([key, details]) => (
-                              <div key={key} className="trace-item">
-                                <strong>{key}:</strong> {
-                                  typeof details === 'object' && details.source !== undefined ? (
-                                    details.source !== "Initial Context" ? (
-                                      <span>(From <span style={{color: '#af52de', fontWeight: 'bold'}}>Node {details.source_idx}</span>)</span>
-                                    ) : (
-                                      <span>(From <span style={{color: '#ff3b30', fontWeight: 'bold'}}>Initial Context</span>)</span>
-                                    )
-                                  ) : (
-                                    <span>({details})</span>
-                                  )
-                                }
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        {(() => {
+                          // Build a set of invalid parameter names for quick lookup
+                          const invalidParams = new Set((nodeInfo.invalid_parameters || []).map(p => p.name));
+                          
+                          return (
+                            <React.Fragment>
+                              {Object.keys(nodeInfo.parameter_resolution.from_pipeline_config || {}).length > 0 && (
+                                <div className="prov-box prov-box-config">
+                                  <div className="prov-header">From Pipeline Configuration:</div>
+                                  {Object.entries(nodeInfo.parameter_resolution.from_pipeline_config).map(([key, details]) => {
+                                    const isInvalid = invalidParams.has(key);
+                                    return (
+                                      <div key={key} className={`trace-item ${isInvalid ? 'trace-item-invalid' : ''}`}>
+                                        <strong>{key}:</strong> {typeof details === 'object' && details.value !== undefined ? details.value + (details.source === 'default' ? ' [default]' : '') : details}
+                                        {isInvalid && <span className="invalid-param-badge">⚠ Invalid parameter</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {Object.keys(nodeInfo.parameter_resolution.from_processor_defaults || {}).length > 0 && (
+                                <div className="prov-box prov-box-default">
+                                  <div className="prov-header">From Processor Defaults:</div>
+                                  {Object.entries(nodeInfo.parameter_resolution.from_processor_defaults).map(([key, details]) => (
+                                    <div key={key} className="trace-item">
+                                      <strong>{key}:</strong> {typeof details === 'object' && details.value !== undefined ? details.value : details}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {Object.keys(nodeInfo.parameter_resolution.from_context || {}).length > 0 && (
+                                <div className="prov-box prov-box-context">
+                                  <div className="prov-header">From Context:</div>
+                                  {Object.entries(nodeInfo.parameter_resolution.from_context).map(([key, details]) => (
+                                    <div key={key} className="trace-item">
+                                      <strong>{key}:</strong> {
+                                        typeof details === 'object' && details.source !== undefined ? (
+                                          details.source !== "Initial Context" ? (
+                                            <span>(From <span style={{color: '#af52de', fontWeight: 'bold'}}>Node {details.source_idx}</span>)</span>
+                                          ) : (
+                                            <span>(From <span style={{color: '#ff3b30', fontWeight: 'bold'}}>Initial Context</span>)</span>
+                                          )
+                                        ) : (
+                                          <span>({details})</span>
+                                        )
+                                      }
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </React.Fragment>
+                          );
+                        })()}
                       </div>
                     ) : (
                       <div className="prov-box" style={{ background: '#f8f9fa', borderLeft: '3px solid #666', color: '#666', fontStyle: 'italic' }}>
@@ -2169,16 +2182,24 @@
                         </div>
                       );
                     }
+                    
+                    // Build a set of invalid parameter names for quick lookup
+                    const invalidParams = new Set((nodeInfo.invalid_parameters || []).map(p => p.name));
+                    
                     return (
                       <div>
                         {Object.keys(pr.from_pipeline_config || {}).length > 0 && (
                           <div className="prov-box prov-box-config">
                             <div className="prov-header">From Pipeline Configuration:</div>
-                            {Object.entries(pr.from_pipeline_config).map(([key, details]) => (
-                              <div key={key} className="trace-item">
-                                <strong>{key}:</strong> {typeof details === 'object' && details.value !== undefined ? details.value + (details.source === 'default' ? ' [default]' : '') : details}
-                              </div>
-                            ))}
+                            {Object.entries(pr.from_pipeline_config).map(([key, details]) => {
+                              const isInvalid = invalidParams.has(key);
+                              return (
+                                <div key={key} className={`trace-item ${isInvalid ? 'trace-item-invalid' : ''}`}>
+                                  <strong>{key}:</strong> {typeof details === 'object' && details.value !== undefined ? details.value + (details.source === 'default' ? ' [default]' : '') : details}
+                                  {isInvalid && <span className="invalid-param-badge">⚠ Invalid parameter</span>}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                         {Object.keys(pr.from_processor_defaults || {}).length > 0 && (
