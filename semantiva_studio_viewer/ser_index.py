@@ -18,15 +18,13 @@ import json
 import hashlib
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-from dataclasses import dataclass, asdict
-
-from .trace_index import TraceEvent, TraceAgg
+from dataclasses import dataclass
 
 
 class SERIndex:
     """In-memory index of SER records for fast querying.
 
-    Provides same API as TraceIndex to maintain compatibility with existing Studio code.
+    Stores raw SER v1 records matching ser_v1.schema.json structure.
     """
 
     def __init__(self) -> None:
@@ -37,9 +35,10 @@ class SERIndex:
         # Raw and derived metadata
         self.meta: Dict[str, Any] = {}
 
-        # Per-node aggregates and events
-        self.per_node: Dict[str, TraceAgg] = {}
-        self.events_by_node: Dict[str, List[TraceEvent]] = {}
+        # Per-node summary (using SER v1 field names: status, timing, error)
+        self.per_node: Dict[str, Dict[str, Any]] = {}
+        # Raw SER records per node (List of dicts matching ser_v1.schema.json)
+        self.events_by_node: Dict[str, List[Dict[str, Any]]] = {}
 
         # Diagnostics
         self.warnings: List[str] = []
@@ -119,12 +118,6 @@ class SERIndex:
 
         except Exception as e:
             raise ValueError(f"Failed to read SER file: {e}")
-
-        # Compute averages for all nodes
-        for node_uuid, agg in index.per_node.items():
-            total_executions = agg.count_after + agg.count_error
-            if total_executions > 0 and agg.t_wall_sum > 0:
-                agg.t_wall_avg = agg.t_wall_sum / total_executions
 
         # Build graph from topology if no pipeline_start was found
         if not index.canonical_nodes:
@@ -237,119 +230,70 @@ class SERIndex:
 
             # Initialize node data if needed
             if node_id not in self.per_node:
-                self.per_node[node_id] = TraceAgg()
+                self.per_node[node_id] = {}
                 self.events_by_node[node_id] = []
 
-            agg = self.per_node[node_id]
+            # Store raw SER record (bounded list)
+            events_list = self.events_by_node[node_id]
+            if len(events_list) >= max_events_per_node:
+                events_list.pop(0)  # Remove oldest
+            events_list.append(record)
+
+            # Update per-node summary with latest SER's key fields (matching schema)
+            status = record.get("status", "unknown")
             timing = record.get("timing", {})
-            status = record.get("status", "succeeded")
+            error = record.get("error")
 
-            # Extract timing info
-            start_time = timing.get("started_at", "")
-            end_time = timing.get("finished_at", "")
-            duration_ms = timing.get("duration_ms", 0)
-            t_wall = duration_ms / 1000.0 if duration_ms else 0.0
-
-            # SER v1: Create single event per execution (not before/after)
-            # Extract data summaries
-            summaries = record.get("summaries", {})
-            context_delta = record.get("context_delta", {})
-            
-            out_data_hash = self._extract_data_hash(
-                summaries, context_delta, "output_data", "created_keys"
-            )
-            out_data_repr = self._extract_data_repr(summaries, "output_data")
-            post_context_hash = self._extract_context_hash(summaries)
-            post_context_repr = self._extract_context_repr(summaries)
-
-            # Extract CPU time (ms -> seconds) when available
-            t_cpu = (
-                (timing.get("cpu_ms") / 1000.0)
-                if timing.get("cpu_ms") is not None
-                else None
-            )
-
-            # Create single event with complete execution data
-            if status == "error":
-                error_info = record.get("error", {})
-                event = TraceEvent(
-                    phase="error",
-                    event_time_utc=end_time,
-                    t_wall=t_wall,
-                    t_cpu=t_cpu,
-                    error_type=error_info.get("type", "Error"),
-                    error_msg=error_info.get("message", ""),
-                    out_data_hash=out_data_hash,
-                    out_data_repr=out_data_repr,
-                    post_context_hash=post_context_hash,
-                    post_context_repr=post_context_repr,
-                    _raw=record,
-                )
-                agg.count_error += 1
-                agg.last_error_type = error_info.get("type")
-                agg.last_error_msg = error_info.get("message")
-                agg.last_phase = "error"
-            else:
-                event = TraceEvent(
-                    phase="completed",
-                    event_time_utc=end_time,
-                    t_wall=t_wall,
-                    t_cpu=t_cpu,
-                    out_data_hash=out_data_hash,
-                    out_data_repr=out_data_repr,
-                    post_context_hash=post_context_hash,
-                    post_context_repr=post_context_repr,
-                    _raw=record,
-                )
-                agg.count_after += 1
-                if t_wall:
-                    agg.t_wall_sum += t_wall
-                agg.last_phase = "completed"
-
-            self._add_event(node_id, event, max_events_per_node)
-            agg.last_event_time_utc = end_time
+            self.per_node[node_id] = {
+                "status": status,  # SER v1 field: "succeeded", "error", "skipped", "cancelled"
+                "timing": {  # SER v1 field structure
+                    "duration_ms": timing.get("duration_ms", 0),
+                    "cpu_ms": timing.get("cpu_ms", 0),
+                },
+                "error": (
+                    error if status == "error" else None
+                ),  # SER v1 field (optional)
+            }
 
         except Exception as e:
             self.warnings.append(f"Error processing SER record: {e}")
 
-    def _add_event(
-        self, node_id: str, event: TraceEvent, max_events_per_node: int
-    ) -> None:
-        """Add event to node with size limit."""
-        events_list = self.events_by_node[node_id]
-        if len(events_list) >= max_events_per_node:
-            events_list.pop(0)  # Remove oldest
-        events_list.append(event)
-
     def _extract_data_hash(
-        self, summaries: Dict, context_delta: Dict, summary_key: str, delta_key: str
+        self,
+        summaries: Dict[str, Any],
+        context_delta: Dict[str, Any],
+        summary_key: str,
+        delta_key: str,
     ) -> Optional[str]:
         """Extract data hash from summaries or compute from created keys."""
         # Try direct summary
         if summary_key in summaries:
             summary = summaries[summary_key]
             if isinstance(summary, dict) and "sha256" in summary:
-                return summary["sha256"]
+                return str(summary["sha256"])
 
         # Try first created key from context_delta
         created = context_delta.get(delta_key, [])
-            
+
         if created and len(created) > 0:
             first_key = created[0]
             # Look for summary of first created key
             for key, summary in summaries.items():
                 if key == first_key and isinstance(summary, dict):
-                    return summary.get("sha256")
+                    sha256 = summary.get("sha256")
+                    return str(sha256) if sha256 is not None else None
 
         return None
 
-    def _extract_data_repr(self, summaries: Dict, summary_key: str) -> Optional[str]:
+    def _extract_data_repr(
+        self, summaries: Dict[str, Any], summary_key: str
+    ) -> Optional[str]:
         """Extract data repr from summaries."""
         if summary_key in summaries:
             summary = summaries[summary_key]
             if isinstance(summary, dict):
                 if "repr" in summary:
-                    return summary["repr"]
+                    return str(summary["repr"])
                 # Build compact repr from available fields
                 parts = []
                 if "dtype" in summary:
@@ -360,20 +304,20 @@ class SERIndex:
                     return f"{{{', '.join(parts)}}}"
         return None
 
-    def _extract_context_hash(self, summaries: Dict) -> Optional[str]:
+    def _extract_context_hash(self, summaries: Dict[str, Any]) -> Optional[str]:
         """Extract or compute context hash from summaries."""
         # Look for post_context summary
         if "post_context" in summaries:
             summary = summaries["post_context"]
             if isinstance(summary, dict) and "sha256" in summary:
-                return summary["sha256"]
+                return str(summary["sha256"])
 
         # Synthesize from created/updated keys
         created_updated = []
         for key, summary in summaries.items():
             if key.startswith(("created_", "updated_")) or key in ("output_data",):
                 if isinstance(summary, dict) and "sha256" in summary:
-                    created_updated.append((key, summary["sha256"]))
+                    created_updated.append((key, str(summary["sha256"])))
 
         if created_updated:
             # Create deterministic hash from all created/updated keys
@@ -382,12 +326,12 @@ class SERIndex:
 
         return None
 
-    def _extract_context_repr(self, summaries: Dict) -> Optional[str]:
+    def _extract_context_repr(self, summaries: Dict[str, Any]) -> Optional[str]:
         """Extract or build context repr from summaries."""
         if "post_context" in summaries:
             summary = summaries["post_context"]
             if isinstance(summary, dict) and "repr" in summary:
-                return summary["repr"]
+                return str(summary["repr"])
 
         # Build context repr from created/updated summaries
         context_parts = []
@@ -414,16 +358,14 @@ class SERIndex:
         self.meta["graph_source"] = "ser_topology"
 
     def summary(self) -> Dict[str, Dict[str, Any]]:
-        """Get summary of all nodes for API."""
-        result = {}
-        for node_uuid, agg in self.per_node.items():
-            result[node_uuid] = asdict(agg)
-        return {"nodes": result}
+        """Return per-node summary using SER v1 field names."""
+        # per_node already contains dicts with SER v1 fields (status, timing, error)
+        return {"nodes": self.per_node}
 
     def node_events(
         self, node_uuid: str, offset: int = 0, limit: int = 100
     ) -> Dict[str, Any]:
-        """Get events for specific node with paging."""
+        """Return raw SER records for a node (already match schema)."""
         if node_uuid not in self.events_by_node:
             return {"events": [], "total": 0}
 
@@ -435,10 +377,8 @@ class SERIndex:
         end = min(start + limit, total)
         page_events = events[start:end]
 
-        # Convert to dict format for JSON serialization
-        events_data = [asdict(event) for event in page_events]
-
-        return {"events": events_data, "total": total, "offset": offset, "limit": limit}
+        # Events are already raw SER dicts matching ser_v1.schema.json
+        return {"events": page_events, "total": total, "offset": offset, "limit": limit}
 
     def get_meta(self) -> Dict[str, Any]:
         """Get SER metadata for API."""
@@ -583,8 +523,6 @@ class MultiSERIndex:
             pid = (
                 # SER v1: record.identity.pipeline_id
                 (record.get("identity") or {}).get("pipeline_id")
-                # SER v0: record.ids.pipeline_id
-                or (record.get("ids") or {}).get("pipeline_id") 
                 # pipeline_start/end: record.pipeline_id
                 or record.get("pipeline_id")
             )
@@ -630,8 +568,6 @@ class MultiSERIndex:
             run_id = (
                 # SER v1: record.identity.run_id
                 (record.get("identity") or {}).get("run_id")
-                # SER v0: record.ids.run_id  
-                or (record.get("ids") or {}).get("run_id")
                 # pipeline_start/end: record.run_id
                 or record.get("run_id")
                 or "unknown"
@@ -678,10 +614,7 @@ class MultiSERIndex:
             idx.pipeline_id = meta.pipeline_id
             idx.run_id = meta.run_id
 
-            for _, agg in idx.per_node.items():
-                total = agg.count_after + agg.count_error
-                if total > 0 and agg.t_wall_sum > 0:
-                    agg.t_wall_avg = agg.t_wall_sum / total
+            # No aggregation computation needed - per_node already has SER v1 data
             if not idx.canonical_nodes:
                 idx._build_graph_from_topology()
 

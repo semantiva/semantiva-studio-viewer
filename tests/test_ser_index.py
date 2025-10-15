@@ -25,50 +25,44 @@ from semantiva_studio_viewer.ser_index import SERIndex
 
 @pytest.fixture
 def sample_ser_data():
-    """Sample SER records for testing."""
+    """Sample SER v1 records for testing."""
     return [
         {
-            "type": "ser",
-            "schema_version": 0,
-            "ids": {
+            "record_type": "ser",
+            "schema_version": 1,
+            "identity": {
                 "run_id": "run-test-123",
                 "pipeline_id": "plid-test-456",
                 "node_id": "node-1",
             },
-            "labels": {
-                "node_fqn": "TestProcessor",
-                "declaration_index": 0,
-                "declaration_subindex": 0,
+            "dependencies": {
+                "upstream": [],
             },
-            "topology": {"upstream": []},
-            "action": {"op_ref": "TestProcessor", "params": {}, "param_source": {}},
-            "io_delta": {
-                "created": ["output_data"],
-                "read": [],
-                "updated": [],
-                "summaries": {},
+            "processor": {
+                "ref": "TestProcessor",
+                "params": {},
+                "param_source": {},
             },
-            "checks": {
-                "why_run": {
-                    "trigger": "dependency",
-                    "upstream_evidence": [],
-                    "pre": [{"code": "CONTEXT.REQKEYS", "result": "PASS"}],
-                    "policy": [{"rule": "RUN.ALLOW", "result": "PASS"}],
-                },
-                "why_ok": {
-                    "post": [{"code": "TYPE.OUT.MATCH", "result": "PASS"}],
-                    "invariants": [{"code": "NONEMPTY", "result": "PASS"}],
-                    "env": {},
-                    "redaction": {},
-                },
+            "context_delta": {
+                "created_keys": ["output_data"],
+                "read_keys": [],
+                "updated_keys": [],
+                "key_summaries": {},
+            },
+            "assertions": {
+                "checks": [{"code": "TYPE.OUT.MATCH", "result": "PASS"}],
             },
             "timing": {
-                "start": "2025-09-14T23:00:00.000Z",
-                "end": "2025-09-14T23:00:01.000Z",
+                "started_at": "2025-09-14T23:00:00.000Z",
+                "finished_at": "2025-09-14T23:00:01.000Z",
                 "duration_ms": 1000,
                 "cpu_ms": 800,
             },
-            "status": "completed",
+            "status": "succeeded",
+            "tags": {
+                "declaration_index": 0,
+                "declaration_subindex": 0,
+            },
             "summaries": {
                 "output_data": {
                     "dtype": "FloatDataType",
@@ -78,43 +72,46 @@ def sample_ser_data():
             },
         },
         {
-            "type": "ser",
-            "schema_version": 0,
-            "ids": {
+            "record_type": "ser",
+            "schema_version": 1,
+            "identity": {
                 "run_id": "run-test-123",
                 "pipeline_id": "plid-test-456",
                 "node_id": "node-2",
             },
-            "labels": {
-                "node_fqn": "FailingProcessor",
+            "dependencies": {
+                "upstream": ["node-1"],
+            },
+            "processor": {
+                "ref": "FailingProcessor",
+                "params": {},
+                "param_source": {},
+            },
+            "context_delta": {
+                "created_keys": [],
+                "read_keys": ["output_data"],
+                "updated_keys": [],
+                "key_summaries": {},
+            },
+            "assertions": {
+                "checks": [],
+            },
+            "timing": {
+                "started_at": "2025-09-14T23:00:00.000Z",
+                "finished_at": "2025-09-14T23:00:02.000Z",
+                "duration_ms": 2000,
+                "cpu_ms": 1500,
+            },
+            "status": "error",
+            "tags": {
                 "declaration_index": 1,
                 "declaration_subindex": 0,
             },
-            "topology": {"upstream": ["node-1"]},
-            "action": {"op_ref": "FailingProcessor", "params": {}, "param_source": {}},
-            "io_delta": {
-                "created": [],
-                "read": ["output_data"],
-                "updated": [],
-                "summaries": {},
+            "error": {
+                "type": "ValueError",
+                "msg": "Test error message",
+                "traceback": "Traceback (most recent call last):\n  ...",
             },
-            "checks": {
-                "why_run": {
-                    "trigger": "dependency",
-                    "upstream_evidence": [{"node_id": "node-1", "state": "completed"}],
-                    "pre": [],
-                    "policy": [],
-                },
-                "why_ok": {"post": [], "invariants": [], "env": {}, "redaction": {}},
-            },
-            "timing": {
-                "start": "2025-09-14T23:00:01.000Z",
-                "end": "2025-09-14T23:00:01.500Z",
-                "duration_ms": 500,
-                "cpu_ms": 400,
-            },
-            "status": "error",
-            "error": {"type": "ValueError", "message": "Test error message"},
         },
     ]
 
@@ -166,20 +163,19 @@ def test_ser_index_summary(sample_ser_data):
         assert "nodes" in summary
         assert len(summary["nodes"]) == 2
 
-        # Check successful node
+        # Check successful node (SER v1: status, timing, error fields)
         node1_agg = summary["nodes"]["node-1"]
-        assert node1_agg["count_before"] == 1
-        assert node1_agg["count_after"] == 1
-        assert node1_agg["count_error"] == 0
-        assert node1_agg["t_wall_sum"] == 1.0  # 1000ms -> 1.0s
+        assert node1_agg["status"] == "succeeded"  # SER v1 status value
+        assert node1_agg["timing"]["duration_ms"] == 1000
+        assert node1_agg["timing"]["cpu_ms"] == 800
+        assert node1_agg["error"] is None  # No error for succeeded node
 
-        # Check failed node
+        # Check failed node (SER v1: status, timing, error fields)
         node2_agg = summary["nodes"]["node-2"]
-        assert node2_agg["count_before"] == 1
-        assert node2_agg["count_after"] == 0
-        assert node2_agg["count_error"] == 1
-        assert node2_agg["last_error_type"] == "ValueError"
-        assert node2_agg["last_error_msg"] == "Test error message"
+        assert node2_agg["status"] == "error"  # SER v1 status field
+        assert node2_agg["error"] is not None
+        assert node2_agg["error"]["type"] == "ValueError"
+        assert node2_agg["error"]["msg"] == "Test error message"
 
     finally:
         Path(temp_path).unlink()
@@ -195,29 +191,27 @@ def test_ser_index_node_events(sample_ser_data):
     try:
         index = SERIndex.from_jsonl(temp_path)
 
-        # Test successful node events
+        # Test successful node events (SER v1: one record per execution)
         events = index.node_events("node-1")
-        assert events["total"] == 2  # before + after
-        assert len(events["events"]) == 2
+        assert events["total"] == 1
+        assert len(events["events"]) == 1
 
-        # Check before event
-        before_event = next(e for e in events["events"] if e["phase"] == "before")
-        assert before_event["event_time_utc"] == "2025-09-14T23:00:00.000Z"
+        # Check event (SER v1 structure)
+        event = events["events"][0]
+        assert event["status"] == "succeeded"
+        assert event["timing"]["started_at"] == "2025-09-14T23:00:00.000Z"
+        assert event["timing"]["finished_at"] == "2025-09-14T23:00:01.000Z"
+        assert event["timing"]["duration_ms"] == 1000
 
-        # Check after event
-        after_event = next(e for e in events["events"] if e["phase"] == "after")
-        assert after_event["event_time_utc"] == "2025-09-14T23:00:01.000Z"
-        assert after_event["t_wall"] == 1.0
-        assert after_event["out_data_hash"] == "sha256-abc123"
-
-        # Test failed node events
+        # Test failed node events (SER v1: one record per execution)
         events = index.node_events("node-2")
-        assert events["total"] == 2  # before + error
+        assert events["total"] == 1
 
-        # Check error event
-        error_event = next(e for e in events["events"] if e["phase"] == "error")
-        assert error_event["error_type"] == "ValueError"
-        assert error_event["error_msg"] == "Test error message"
+        # Check error event (SER v1 structure)
+        event = events["events"][0]
+        assert event["status"] == "error"
+        assert event["error"]["type"] == "ValueError"
+        assert event["error"]["msg"] == "Test error message"
 
     finally:
         Path(temp_path).unlink()

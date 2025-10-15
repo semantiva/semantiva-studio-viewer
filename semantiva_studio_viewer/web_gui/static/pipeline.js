@@ -547,13 +547,15 @@
         (maxCallouts * LAYOUT_CONFIG.calloutHeight) + ((maxCallouts - 1) * LAYOUT_CONFIG.calloutSpacing) : 0;
       const dynamicHeight = Math.max(LAYOUT_CONFIG.baseContentHeight, calloutsHeight + 30);
 
-      // Determine trace status class
+      // Determine trace status class (using SER v1 status field)
       let traceClass = '';
       if (traceOverlayVisible && traceAgg) {
-        if (traceAgg.last_phase === 'after' && traceAgg.count_error === 0) {
+        if (traceAgg.status === 'succeeded') {
           traceClass = 'trace-success';
-        } else if (traceAgg.count_error > 0) {
+        } else if (traceAgg.status === 'error') {
           traceClass = 'trace-error';
+        } else if (traceAgg.status === 'skipped' || traceAgg.status === 'cancelled') {
+          traceClass = 'trace-neutral';
         } else {
           traceClass = 'trace-neutral';
         }
@@ -1468,7 +1470,12 @@
             throw new Error(`Failed to load events for node ${nodeUuid}`);
           })
           .then(response => {
-            const events = response.events || [];
+            const rawEvents = response.events || [];
+            // Wrap raw SER dicts for frontend compatibility: {status, _raw: ser_dict}
+            const events = rawEvents.map(ser => ({
+              status: ser.status || 'unknown',
+              _raw: ser
+            }));
             console.log(`Loaded ${events.length} trace events for node ${nodeId}`);
             setNodeTraceEvents(prev => {
               const outer = new Map(prev);
@@ -1558,10 +1565,10 @@
           const nodeEvents = runMap.get(nodeUuid) || [];
           if (!nodeEvents.length) return undefined;
 
-          // Prefer 'after', else 'error', else first
+          // Prefer 'succeeded', else 'error', else first
           let chosen = null;
-          for (const ev of nodeEvents) { if (ev.phase === 'after') chosen = ev; }
-          if (!chosen) { for (const ev of nodeEvents) { if (ev.phase === 'error') { chosen = ev; break; } } }
+          for (const ev of nodeEvents) { if (ev.status === 'succeeded') chosen = ev; }
+          if (!chosen) { for (const ev of nodeEvents) { if (ev.status === 'error') { chosen = ev; break; } } }
           if (!chosen) chosen = nodeEvents[0];
           const rawData = chosen && chosen._raw;
           if (!rawData || rawData.type !== 'ser') return undefined;
@@ -2135,9 +2142,9 @@
                   // Determine display status
                   let status = 'Unknown';
                   if (latestEvent) {
-                    if (latestEvent.phase === 'error') {
+                    if (latestEvent.status === 'error') {
                       status = 'Error';
-                    } else if (latestEvent.phase === 'completed' || status_from_raw === 'succeeded') {
+                    } else if (latestEvent.status === 'succeeded' || status_from_raw === 'succeeded') {
                       status = 'Completed';
                     }
                   }
@@ -2254,7 +2261,7 @@
                       )}
 
                       {/* Error summary if event is error */}
-                      {latestEvent && latestEvent.phase === 'error' && (
+                      {latestEvent && latestEvent.status === 'error' && (
                         <div style={{ marginTop: '8px', padding: '10px', border: '1px solid #f8d7da', background: '#fff5f6', borderRadius: '6px' }}>
                           <div className="trace-item"><strong>Error Type:</strong> {latestEvent.error_type}</div>
                           {latestEvent.error_msg && (

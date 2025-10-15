@@ -144,9 +144,9 @@ semantiva-studio-viewer export-components semantiva_components.ttl components.ht
 ## Notes
 
 * The inspector tolerates partially invalid configs to aid debugging.
-* **SER v0 (draft) format** is used for execution traces in the current version.
-* When traces are present, **node→UUID mapping uses SER labels** first, then **positional identity** (from `canonical_spec`); FQN fallbacks are used only if necessary.
-* **SER-only mode**: If only SER data is available (no pipeline config), Studio can reconstruct basic graph topology from SER `upstream` relationships.
+* **SER v1 format** is used for execution traces.
+* When traces are present, **node→UUID mapping uses SER identity** first, then **positional identity** (from `canonical_spec`); FQN fallbacks are used only if necessary.
+* **SER-only mode**: If only SER data is available (no pipeline config), Studio can reconstruct basic graph topology from SER `dependencies.upstream` relationships.
 
 ---
 

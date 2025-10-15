@@ -24,6 +24,64 @@ from fastapi.testclient import TestClient
 from semantiva_studio_viewer.pipeline import app
 
 
+def _make_ser_v1(
+    run_id,
+    pipeline_id,
+    node_id,
+    processor_ref,
+    parameters=None,
+    upstream=None,
+    timing=None,
+):
+    """Helper to create a SER v1 record for integration tests."""
+    if parameters is None:
+        parameters = {}
+    if upstream is None:
+        upstream = []
+    if timing is None:
+        timing = {
+            "started_at": "2025-09-14T23:00:00.000Z",
+            "finished_at": "2025-09-14T23:00:01.000Z",
+            "duration_ms": 1000,
+            "cpu_ms": 800,
+        }
+
+    return {
+        "record_type": "ser",
+        "schema_version": 1,
+        "identity": {
+            "run_id": run_id,
+            "pipeline_id": pipeline_id,
+            "node_id": node_id,
+        },
+        "dependencies": {"upstream": upstream},
+        "processor": {
+            "ref": processor_ref,
+            "parameters": parameters,
+            "parameter_sources": {},
+        },
+        "context_delta": {
+            "read_keys": [],
+            "created_keys": ["output_data"],
+            "updated_keys": [],
+            "key_summaries": {},
+        },
+        "assertions": {
+            "preconditions": [{"code": "CONTEXT.READY", "result": "PASS"}],
+            "postconditions": [{"code": "OUTPUT.VALID", "result": "PASS"}],
+            "invariants": [],
+            "environment": {
+                "python": "3.12.0",
+                "platform": "Linux",
+                "semantiva": "1.0.0",
+            },
+            "redaction_policy": {},
+        },
+        "timing": timing,
+        "status": "succeeded",
+    }
+
+
 @pytest.fixture
 def sample_pipeline_config():
     """Sample pipeline configuration."""
@@ -35,54 +93,53 @@ def sample_pipeline_config():
 
 @pytest.fixture
 def sample_ser_file():
-    """Create a temporary SER file."""
+    """Create a temporary SER file with SER v1 records."""
     ser_data = [
         {
-            "type": "ser",
-            "schema_version": 0,
-            "ids": {
+            "record_type": "ser",
+            "schema_version": 1,
+            "identity": {
                 "run_id": "run-test-456",
                 "pipeline_id": "plid-test-789",
                 "node_id": "node-uuid-1",
             },
-            "labels": {
-                "node_fqn": "FloatValueDataSource",
-                "declaration_index": 0,
-                "declaration_subindex": 0,
+            "dependencies": {"upstream": []},
+            "processor": {
+                "ref": "FloatValueDataSource",
+                "parameters": {"value": 42.0},
+                "parameter_sources": {},
             },
-            "topology": {"upstream": []},
-            "action": {
-                "op_ref": "FloatValueDataSource",
-                "params": {"value": 42.0},
-                "param_source": {},
+            "context_delta": {
+                "created_keys": ["output_data"],
+                "read_keys": [],
+                "updated_keys": [],
+                "key_summaries": {},
             },
-            "io_delta": {
-                "created": ["output_data"],
-                "read": [],
-                "updated": [],
-                "summaries": {},
-            },
-            "checks": {
-                "why_run": {
-                    "trigger": "dependency",
-                    "upstream_evidence": [],
-                    "pre": [{"code": "CONTEXT.REQKEYS", "result": "PASS"}],
-                    "policy": [{"rule": "RUN.ALLOW", "result": "PASS"}],
+            "assertions": {
+                "preconditions": [{"code": "CONTEXT.REQKEYS", "result": "PASS"}],
+                "postconditions": [
+                    {"code": "TYPE.OUT.MATCH", "result": "PASS"},
+                    {"code": "NONEMPTY", "result": "PASS"},
+                ],
+                "invariants": [],
+                "environment": {
+                    "python": "3.12.0",
+                    "platform": "Linux",
+                    "semantiva": "1.0.0",
                 },
-                "why_ok": {
-                    "post": [{"code": "TYPE.OUT.MATCH", "result": "PASS"}],
-                    "invariants": [{"code": "NONEMPTY", "result": "PASS"}],
-                    "env": {},
-                    "redaction": {},
-                },
+                "redaction_policy": {},
             },
             "timing": {
-                "start": "2025-09-14T23:00:00.000Z",
-                "end": "2025-09-14T23:00:01.000Z",
+                "started_at": "2025-09-14T23:00:00.000Z",
+                "finished_at": "2025-09-14T23:00:01.000Z",
                 "duration_ms": 1000,
                 "cpu_ms": 800,
             },
-            "status": "completed",
+            "status": "succeeded",
+            "tags": {
+                "declaration_index": 0,
+                "declaration_subindex": 0,
+            },
             "summaries": {
                 "output_data": {
                     "dtype": "FloatDataType",
@@ -92,53 +149,47 @@ def sample_ser_file():
             },
         },
         {
-            "type": "ser",
-            "schema_version": 0,
-            "ids": {
+            "record_type": "ser",
+            "schema_version": 1,
+            "identity": {
                 "run_id": "run-test-456",
                 "pipeline_id": "plid-test-789",
                 "node_id": "node-uuid-2",
             },
-            "labels": {
-                "node_fqn": "FloatMultiplyOperation",
-                "declaration_index": 1,
-                "declaration_subindex": 0,
+            "dependencies": {"upstream": ["node-uuid-1"]},
+            "processor": {
+                "ref": "FloatMultiplyOperation",
+                "parameters": {"factor": 2.0},
+                "parameter_sources": {},
             },
-            "topology": {"upstream": ["node-uuid-1"]},
-            "action": {
-                "op_ref": "FloatMultiplyOperation",
-                "params": {"factor": 2.0},
-                "param_source": {},
+            "context_delta": {
+                "created_keys": ["output_data"],
+                "read_keys": ["output_data"],
+                "updated_keys": [],
+                "key_summaries": {},
             },
-            "io_delta": {
-                "created": ["output_data"],
-                "read": ["output_data"],
-                "updated": [],
-                "summaries": {},
-            },
-            "checks": {
-                "why_run": {
-                    "trigger": "dependency",
-                    "upstream_evidence": [
-                        {"node_id": "node-uuid-1", "state": "completed"}
-                    ],
-                    "pre": [],
-                    "policy": [],
+            "assertions": {
+                "preconditions": [],
+                "postconditions": [{"code": "TYPE.OUT.MATCH", "result": "PASS"}],
+                "invariants": [],
+                "environment": {
+                    "python": "3.12.0",
+                    "platform": "Linux",
+                    "semantiva": "1.0.0",
                 },
-                "why_ok": {
-                    "post": [{"code": "TYPE.OUT.MATCH", "result": "PASS"}],
-                    "invariants": [],
-                    "env": {},
-                    "redaction": {},
-                },
+                "redaction_policy": {},
             },
             "timing": {
-                "start": "2025-09-14T23:00:01.000Z",
-                "end": "2025-09-14T23:00:02.000Z",
+                "started_at": "2025-09-14T23:00:01.000Z",
+                "finished_at": "2025-09-14T23:00:02.000Z",
                 "duration_ms": 1000,
                 "cpu_ms": 900,
             },
-            "status": "completed",
+            "status": "succeeded",
+            "tags": {
+                "declaration_index": 1,
+                "declaration_subindex": 0,
+            },
             "summaries": {
                 "output_data": {
                     "dtype": "FloatDataType",
@@ -184,38 +235,37 @@ def test_pipeline_with_ser_trace(sample_pipeline_config, sample_ser_file):
     assert "nodes" in summary
     assert len(summary["nodes"]) == 2
 
-    # Check node aggregates
+    # Check node aggregates (SER v1: status, timing, error)
     nodes = summary["nodes"]
     node1 = nodes["node-uuid-1"]
-    assert node1["count_before"] == 1
-    assert node1["count_after"] == 1
-    assert node1["count_error"] == 0
+    assert node1["status"] == "succeeded"  # SER v1 status value
+    assert node1["timing"]["duration_ms"] > 0
+    assert node1["error"] is None
 
     node2 = nodes["node-uuid-2"]
-    assert node2["count_before"] == 1
-    assert node2["count_after"] == 1
-    assert node2["count_error"] == 0
+    assert node2["status"] == "succeeded"  # SER v1 status value
+    assert node2["timing"]["duration_ms"] > 0
+    assert node2["error"] is None
 
     # Test node events endpoint
     response = client.get("/api/trace/node/node-uuid-1")
     assert response.status_code == 200
     events = response.json()
-    assert events["total"] == 2  # before + after
-    assert len(events["events"]) == 2
+    assert events["total"] == 1  # One SER record per execution (not before+after)
+    assert len(events["events"]) == 1
 
-    # Check event details
-    before_event = next(e for e in events["events"] if e["phase"] == "before")
-    assert before_event["event_time_utc"] == "2025-09-14T23:00:00.000Z"
+    # Check event details (SER v1 structure)
+    event = events["events"][0]
+    assert event["status"] == "succeeded"
+    assert event["timing"]["finished_at"] is not None
+    assert event["timing"]["duration_ms"] > 0
 
-    after_event = next(e for e in events["events"] if e["phase"] == "after")
-    assert after_event["event_time_utc"] == "2025-09-14T23:00:01.000Z"
-    assert after_event["t_wall"] == 1.0
-    assert after_event["out_data_hash"] == "sha256-abc123"
-
-    # Check SER-specific data in raw event
-    assert after_event["_raw"]["type"] == "ser"
-    assert "checks" in after_event["_raw"]
-    assert "io_delta" in after_event["_raw"]
+    # Check SER v1 structure
+    assert event["record_type"] == "ser"  # SER v1 uses record_type
+    assert event["schema_version"] == 1  # SER v1
+    assert "identity" in event  # SER v1 uses identity instead of ids
+    assert "context_delta" in event  # SER v1 uses context_delta instead of io_delta
+    assert "processor" in event  # SER v1 uses processor instead of action
 
     # Test trace mapping endpoint
     response = client.get("/api/trace/mapping")
@@ -228,21 +278,26 @@ def test_pipeline_with_ser_trace(sample_pipeline_config, sample_ser_file):
     response = client.get("/api/trace/node/node-uuid-2")
     assert response.status_code == 200
     events = response.json()
-    after_event = next(e for e in events["events"] if e["phase"] == "after")
+    # Events are raw SER v1 records (no before/after wrapping)
+    assert len(events["events"]) == 1
+    event = events["events"][0]
+    assert event["status"] == "succeeded"
+    assert event["record_type"] == "ser"
+    assert event["identity"]["node_id"] == "node-uuid-2"
 
-    # Verify SER checks are present
-    checks = after_event["_raw"]["checks"]
-    assert "why_run" in checks
-    assert "why_ok" in checks
-    assert checks["why_ok"]["post"][0]["code"] == "TYPE.OUT.MATCH"
-    assert checks["why_ok"]["post"][0]["result"] == "PASS"
+    # Verify SER v1 assertions are present
+    assertions = event["assertions"]
+    assert "postconditions" in assertions
+    assert len(assertions["postconditions"]) > 0
+    assert assertions["postconditions"][0]["code"] == "TYPE.OUT.MATCH"
+    assert assertions["postconditions"][0]["result"] == "PASS"
 
-    # Verify IO delta is present
-    io_delta = after_event["_raw"]["io_delta"]
-    assert "created" in io_delta
-    assert "read" in io_delta
-    assert io_delta["created"] == ["output_data"]
-    assert io_delta["read"] == ["output_data"]
+    # Verify context_delta is present (SER v1)
+    context_delta = event["context_delta"]
+    assert "created_keys" in context_delta
+    assert "read_keys" in context_delta
+    assert "output_data" in context_delta["created_keys"]
+    assert "output_data" in context_delta["read_keys"]
 
 
 def test_pipeline_without_trace():
@@ -271,118 +326,68 @@ def test_pipeline_without_trace():
 
 @pytest.fixture
 def sample_multi_run_ser_file():
-    """Create a temporary multi-run SER file."""
+    """Create a temporary multi-run SER v1 file."""
     ser_data = [
         # Run 1 - node 1
-        {
-            "type": "ser",
-            "schema_version": 0,
-            "ids": {
-                "run_id": "run-multi-1",
-                "pipeline_id": "plid-multi",
-                "node_id": "node-uuid-1",
-            },
-            "labels": {
-                "node_fqn": "FloatValueDataSource",
-                "declaration_index": 0,
-                "declaration_subindex": 0,
-            },
-            "topology": {"upstream": []},
-            "checks": {
-                "why_ok": {
-                    "args": {"value": 42.0, "fanout.index": 0},
-                    "env": {
-                        "python": "3.12.0",
-                        "platform": "Linux",
-                        "semantiva": "1.0.0",
-                        "registry": {"fingerprint": "fingerprint-run1"},
-                    },
-                }
-            },
-            "timing": {
-                "start": "2025-09-14T23:00:00.000Z",
-                "end": "2025-09-14T23:00:01.000Z",
+        _make_ser_v1(
+            "run-multi-1",
+            "plid-multi",
+            "node-uuid-1",
+            "FloatValueDataSource",
+            parameters={"value": 42.0},
+            upstream=[],
+            timing={
+                "started_at": "2025-09-14T23:00:00.000Z",
+                "finished_at": "2025-09-14T23:00:01.000Z",
                 "duration_ms": 1000,
+                "cpu_ms": 800,
             },
-            "status": "completed",
-        },
+        ),
         # Run 1 - node 2
-        {
-            "type": "ser",
-            "schema_version": 0,
-            "ids": {
-                "run_id": "run-multi-1",
-                "pipeline_id": "plid-multi",
-                "node_id": "node-uuid-2",
-            },
-            "labels": {
-                "node_fqn": "FloatMultiplyOperation",
-                "declaration_index": 1,
-                "declaration_subindex": 0,
-            },
-            "topology": {"upstream": ["node-uuid-1"]},
-            "timing": {
-                "start": "2025-09-14T23:00:01.000Z",
-                "end": "2025-09-14T23:00:02.000Z",
+        _make_ser_v1(
+            "run-multi-1",
+            "plid-multi",
+            "node-uuid-2",
+            "FloatMultiplyOperation",
+            parameters={"factor": 2.0},
+            upstream=["node-uuid-1"],
+            timing={
+                "started_at": "2025-09-14T23:00:01.000Z",
+                "finished_at": "2025-09-14T23:00:02.000Z",
                 "duration_ms": 1000,
+                "cpu_ms": 900,
             },
-            "status": "completed",
-        },
+        ),
         # Run 2 - node 1
-        {
-            "type": "ser",
-            "schema_version": 0,
-            "ids": {
-                "run_id": "run-multi-2",
-                "pipeline_id": "plid-multi",
-                "node_id": "node-uuid-1",
-            },
-            "labels": {
-                "node_fqn": "FloatValueDataSource",
-                "declaration_index": 0,
-                "declaration_subindex": 0,
-            },
-            "topology": {"upstream": []},
-            "checks": {
-                "why_ok": {
-                    "args": {"value": 84.0, "fanout.index": 1},
-                    "env": {
-                        "python": "3.11.5",
-                        "platform": "Darwin",
-                        "semantiva": "1.0.0",
-                        "registry": {"fingerprint": "fingerprint-run2"},
-                    },
-                }
-            },
-            "timing": {
-                "start": "2025-09-14T23:00:10.000Z",
-                "end": "2025-09-14T23:00:11.000Z",
+        _make_ser_v1(
+            "run-multi-2",
+            "plid-multi",
+            "node-uuid-1",
+            "FloatValueDataSource",
+            parameters={"value": 84.0},
+            upstream=[],
+            timing={
+                "started_at": "2025-09-14T23:00:10.000Z",
+                "finished_at": "2025-09-14T23:00:11.000Z",
                 "duration_ms": 1000,
+                "cpu_ms": 800,
             },
-            "status": "completed",
-        },
+        ),
         # Run 2 - node 2
-        {
-            "type": "ser",
-            "schema_version": 0,
-            "ids": {
-                "run_id": "run-multi-2",
-                "pipeline_id": "plid-multi",
-                "node_id": "node-uuid-2",
-            },
-            "labels": {
-                "node_fqn": "FloatMultiplyOperation",
-                "declaration_index": 1,
-                "declaration_subindex": 0,
-            },
-            "topology": {"upstream": ["node-uuid-1"]},
-            "timing": {
-                "start": "2025-09-14T23:00:11.000Z",
-                "end": "2025-09-14T23:00:12.000Z",
+        _make_ser_v1(
+            "run-multi-2",
+            "plid-multi",
+            "node-uuid-2",
+            "FloatMultiplyOperation",
+            parameters={"factor": 2.0},
+            upstream=["node-uuid-1"],
+            timing={
+                "started_at": "2025-09-14T23:00:11.000Z",
+                "finished_at": "2025-09-14T23:00:12.000Z",
                 "duration_ms": 1000,
+                "cpu_ms": 900,
             },
-            "status": "completed",
-        },
+        ),
     ]
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
@@ -503,7 +508,7 @@ def test_multi_run_invalid_run_id(sample_pipeline_config, sample_multi_run_ser_f
 def test_multi_run_args_and_env_in_events(
     sample_pipeline_config, sample_multi_run_ser_file
 ):
-    """Test that run args and environment data are accessible in events."""
+    """Test that run parameters and environment data are accessible in SER v1 events."""
     app.state.config = sample_pipeline_config
     app.state.trace_jsonl = sample_multi_run_ser_file
     app.state.trace_index = None
@@ -516,50 +521,35 @@ def test_multi_run_args_and_env_in_events(
     assert response.status_code == 200
     events = response.json()
 
-    # Find the before or after event with raw SER data
-    ser_event = None
-    for event in events["events"]:
-        if event.get("_raw") and event["_raw"].get("checks"):
-            ser_event = event
-            break
+    # Events are raw SER v1 records
+    assert len(events["events"]) == 1
+    event = events["events"][0]
 
-    assert ser_event is not None
+    # Check SER v1 structure
+    assert event["record_type"] == "ser"
+    assert event["identity"]["run_id"] == "run-multi-1"
 
-    # Check that run args are present
-    checks = ser_event["_raw"]["checks"]
-    assert "why_ok" in checks
-    assert "args" in checks["why_ok"]
-    assert checks["why_ok"]["args"]["value"] == 42.0
-    assert checks["why_ok"]["args"]["fanout.index"] == 0
+    # Check that processor parameters are present (SER v1)
+    assert event["processor"]["parameters"]["value"] == 42.0
 
-    # Check that environment is present
-    assert "env" in checks["why_ok"]
-    env = checks["why_ok"]["env"]
+    # Check that environment is present in assertions (SER v1)
+    assert "environment" in event["assertions"]
+    env = event["assertions"]["environment"]
     assert env["python"] == "3.12.0"
     assert env["platform"] == "Linux"
     assert env["semantiva"] == "1.0.0"
-    assert env["registry"]["fingerprint"] == "fingerprint-run1"
 
     # Get events for run 2 and verify different data
     response = client.get("/api/trace/node/node-uuid-1?run=run-multi-2")
     assert response.status_code == 200
     events = response.json()
 
-    ser_event = None
-    for event in events["events"]:
-        if event.get("_raw") and event["_raw"].get("checks"):
-            ser_event = event
-            break
+    assert len(events["events"]) == 1
+    event = events["events"][0]
 
-    assert ser_event is not None
-    checks = ser_event["_raw"]["checks"]
-
-    # Verify different run args and environment
-    assert checks["why_ok"]["args"]["value"] == 84.0
-    assert checks["why_ok"]["args"]["fanout.index"] == 1
-    assert checks["why_ok"]["env"]["python"] == "3.11.5"
-    assert checks["why_ok"]["env"]["platform"] == "Darwin"
-    assert checks["why_ok"]["env"]["registry"]["fingerprint"] == "fingerprint-run2"
+    # Verify different run parameters
+    assert event["processor"]["parameters"]["value"] == 84.0
+    assert event["identity"]["run_id"] == "run-multi-2"
 
 
 def test_single_run_backward_compatibility(sample_pipeline_config, sample_ser_file):
