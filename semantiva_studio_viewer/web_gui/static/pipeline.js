@@ -262,8 +262,8 @@
         started: timing.started_at || '—',
         ended: timing.finished_at || '—',
         status: (raw && raw.status) || '—',
-  // Normalize timings: prefer ms fields, fall back to seconds fields converted to ms
-  wall: (timing.duration_ms != null) ? `${timing.duration_ms} ms` : (timing.duration_s != null ? `${Math.round(Number(timing.duration_s) * 1000)} ms` : (timing.duration != null ? `${Math.round(Number(timing.duration) * 1000)} ms` : '—')),
+  // Normalize timings: prefer wall_ms (schema v1), then legacy duration_ms, then seconds→ms
+  wall: (timing.wall_ms != null) ? `${timing.wall_ms} ms` : (timing.duration_ms != null) ? `${timing.duration_ms} ms` : (timing.duration_s != null ? `${Math.round(Number(timing.duration_s) * 1000)} ms` : (timing.duration != null ? `${Math.round(Number(timing.duration) * 1000)} ms` : '—')),
   cpu: (timing.cpu_ms != null) ? `${timing.cpu_ms} ms` : (timing.cpu_s != null ? `${Math.round(Number(timing.cpu_s) * 1000)} ms` : (timing.cpu != null ? `${Math.round(Number(timing.cpu) * 1000)} ms` : '—')),
         env: assertions.environment || null,
         runArgs: assertions.args || null,
