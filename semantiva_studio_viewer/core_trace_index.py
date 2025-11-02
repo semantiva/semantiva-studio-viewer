@@ -22,7 +22,9 @@ from semantiva.trace.aggregation import TraceAggregator, RunAggregate
 _MAX_EVENTS_PER_NODE = 500  # UI-only buffer
 
 
-def _expected_positional_maps(spec: Optional[Dict[str, Any]]) -> Tuple[Dict[str, str], Dict[str, Dict[str, int]], Dict[str, Dict[str, Any]]]:
+def _expected_positional_maps(
+    spec: Optional[Dict[str, Any]],
+) -> Tuple[Dict[str, str], Dict[str, Dict[str, int]], Dict[str, Dict[str, Any]]]:
     idx_to_uuid: Dict[str, str] = {}
     uuid_to_idx: Dict[str, Dict[str, int]] = {}
     canonical_nodes: Dict[str, Dict[str, Any]] = {}
@@ -76,8 +78,8 @@ class CoreTraceIndex:
         return {
             "run_id": run.run_id,
             "pipeline_id": run.pipeline_id,
-            "started_at": run.start_ts,
-            "ended_at": run.end_ts,
+            "started_at": run.start_timestamp,
+            "ended_at": run.end_timestamp,
             "node_mappings": {
                 "index_to_uuid": idx_to_uuid,
                 "uuid_to_index": uuid_to_idx,
@@ -246,8 +248,8 @@ class MultiTraceIndex:
                 {
                     "run_id": run.run_id,
                     "pipeline_id": run.pipeline_id,
-                    "started_at": run.start_ts,
-                    "ended_at": run.end_ts,
+                    "started_at": run.start_timestamp,
+                    "ended_at": run.end_timestamp,
                     "total_events": sum(
                         (na.counts or {}).get("total_records", 0)
                         for na in run.nodes.values()
