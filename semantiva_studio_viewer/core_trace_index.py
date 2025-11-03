@@ -75,9 +75,23 @@ class CoreTraceIndex:
         )
         # expose canonical_nodes for `/api/trace/meta` optional field
         self.canonical_nodes = canonical_nodes
+
+        # Extract semantic_id and config_id from run.meta if present
+        # semantic_id: pipeline structure identity (computed from canonical spec)
+        # config_id: pipeline configuration identity (computed from node semantic IDs)
+        meta = run.meta or {}
+        # Map upstream pipeline_config_id to both semantic_id and config_id for compatibility
+        pipeline_config_id = meta.get("pipeline_config_id")
+        semantic_id = meta.get("semantic_id") or pipeline_config_id
+        config_id = meta.get("config_id") or pipeline_config_id
+        node_semantic_ids = meta.get("node_semantic_ids", {})
+
         return {
             "run_id": run.run_id,
             "pipeline_id": run.pipeline_id,
+            "semantic_id": semantic_id,
+            "config_id": config_id,
+            "node_semantic_ids": node_semantic_ids,
             "started_at": run.start_timestamp,
             "ended_at": run.end_timestamp,
             "node_mappings": {

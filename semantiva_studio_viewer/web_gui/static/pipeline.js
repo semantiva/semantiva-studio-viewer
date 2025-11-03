@@ -48,6 +48,16 @@
       return hash.substring(0, maxLength) + '...';
     }
 
+    // Format numeric values preserving float type (e.g., 10.0 stays "10.0", not "10")
+    function formatNumber(value) {
+      if (typeof value !== 'number') return String(value);
+      // Always show at least one decimal place for whole numbers to preserve float type
+      if (Number.isInteger(value)) {
+        return value.toFixed(1);
+      }
+      return String(value);
+    }
+
     function createCalloutStyle(type, text) {
       const width = calculateCalloutWidth(text);
       const baseStyle = {
@@ -85,6 +95,11 @@
           background: '#e8f5ea',
           border: '1px solid #34c759',
           color: '#1d8348'
+        },
+        sweep: {
+          background: '#e6fbfb',
+          border: '1px solid #00b3b3',
+          color: '#007a7a'
         }
       };
 
@@ -526,7 +541,8 @@
       }, [node.id, node.data.contextParams.length, registerAnchors]);
 
       const leftParamCount = ((node.data.pipelineConfigParams ? node.data.pipelineConfigParams.length : 0) || 0) + 
-                             ((node.data.defaultParams ? node.data.defaultParams.length : 0) || 0);
+                             ((node.data.defaultParams ? node.data.defaultParams.length : 0) || 0) +
+                             ((node.data.sweepParams ? node.data.sweepParams.length : 0) || 0);
       const rightParamCount = (node.data.contextParams ? node.data.contextParams.length : 0) + 
                               (node.data.createdKeys ? node.data.createdKeys.length : 0);
       
@@ -747,7 +763,17 @@
                 key={param}
                 className="param-label left-anchor-default"
                 style={createCalloutStyle('default', param)}
-                title={getCalloutHoverText ? getCalloutHoverText(node.id, 'param', param) : undefined}
+                title={getCalloutHoverText ? getCalloutHoverText(node.id, 'default', param) : undefined}
+              >
+                {param}
+              </div>
+            ))}
+            {(node.data.sweepParams || []).map((param, i) => (
+              <div
+                key={param}
+                className="param-label left-anchor-default"
+                style={createCalloutStyle('sweep', param)}
+                title={getCalloutHoverText ? getCalloutHoverText(node.id, 'sweep', param) : undefined}
               >
                 {param}
               </div>
@@ -769,7 +795,8 @@
       // Calculate dynamic height for each node
       const calculateNodeHeight = (node) => {
         const leftParamCount = ((node.data.pipelineConfigParams ? node.data.pipelineConfigParams.length : 0) || 0) + 
-                               ((node.data.defaultParams ? node.data.defaultParams.length : 0) || 0);
+                               ((node.data.defaultParams ? node.data.defaultParams.length : 0) || 0) +
+                               ((node.data.sweepParams ? node.data.sweepParams.length : 0) || 0);
         const rightParamCount = (node.data.contextParams ? node.data.contextParams.length : 0) + 
                                 (node.data.createdKeys ? node.data.createdKeys.length : 0);
         const maxCallouts = Math.max(leftParamCount, rightParamCount);
@@ -868,7 +895,8 @@
         const configWidths = nodes.map(n => {
           const configParams = n.data.pipelineConfigParams || [];
           const defaultParams = n.data.defaultParams || [];
-          const allParams = [...configParams, ...defaultParams];
+          const sweepParams = n.data.sweepParams || [];
+          const allParams = [...configParams, ...defaultParams, ...sweepParams];
           return allParams.length ? Math.max(...allParams.map(p => p.length)) : 80;
         });
         const maxData = Math.max(LAYOUT_CONFIG.nodeWidth, ...dataWidths);
@@ -1138,6 +1166,7 @@
       const [traceFqnToUuid, setTraceFqnToUuid] = useState(new Map());
       const [traceLabelToUuid, setTraceLabelToUuid] = useState(new Map());
       const [nodeTraceEvents, setNodeTraceEvents] = useState(new Map());
+      const [metadataPanelOpen, setMetadataPanelOpen] = useState(false);
 
       // Resizable panels
       const sidebar = useResizable(400, 200, 600);
@@ -1205,16 +1234,32 @@
               
               // Create parameter data with source information for visual display
               const configParams = [];
+              let configParamValues = {};
               const defaultParams = [];
+              let defaultParamValues = {};
               
               // Parameters from pipeline configuration
               if (node.parameter_resolution && node.parameter_resolution.from_pipeline_config) {
                 configParams.push(...Object.keys(node.parameter_resolution.from_pipeline_config));
+                configParamValues = node.parameter_resolution.from_pipeline_config;
               }
               
               // Parameters from processor defaults
               if (node.parameter_resolution && node.parameter_resolution.from_processor_defaults) {
                 defaultParams.push(...Object.keys(node.parameter_resolution.from_processor_defaults));
+                defaultParamValues = node.parameter_resolution.from_processor_defaults;
+              }
+              
+              // Extract sweep parameters from preprocessor_metadata
+              const sweepParams = [];
+              let sweepParamExpressions = {};
+              let preprocessorView = null;
+              if (node.preprocessor_metadata && 
+                  node.preprocessor_metadata.type === 'derive.parameter_sweep' &&
+                  node.preprocessor_metadata.param_expressions) {
+                sweepParams.push(...Object.keys(node.preprocessor_metadata.param_expressions));
+                sweepParamExpressions = node.preprocessor_metadata.param_expressions;
+                preprocessorView = node.preprocessor_view || null;
               }
               
               return {
@@ -1225,7 +1270,12 @@
                   inputType: node.input_type || '',
                   outputType: node.output_type || '',
                   pipelineConfigParams: configParams,
+                  configParamValues: configParamValues,
                   defaultParams: defaultParams,
+                  defaultParamValues: defaultParamValues,
+                  sweepParams: sweepParams,
+                  sweepParamExpressions: sweepParamExpressions,
+                  preprocessorView: preprocessorView,
                   contextParams: node.contextParams || [],
                   createdKeys: node.created_keys || [],
                   errors: node.errors || [], // Include error information
@@ -1541,10 +1591,54 @@
       };
 
       // Compute a user-friendly value for a callout hover from SER trace.
-      // type: 'param' for any parameter callout (config/default/context), 'created' for produced keys.
+      // type: 'param' for any parameter callout (config/default/context), 'sweep' for sweep parameters, 'created' for produced keys.
       const getCalloutHoverText = useCallback((nodeId, type, name) => {
         try {
-          if (!traceAvailable || !name) return undefined;
+          if (!name) return undefined;
+          
+          // Handle sweep parameters: show the expression defined at configuration
+          if (type === 'sweep') {
+            const rfNode = rfNodes.find(n => n.id === nodeId);
+            if (!rfNode || !rfNode.data || !rfNode.data.sweepParamExpressions) return undefined;
+            
+            // Just return the expression string directly—no parsing, no conversion
+            if (rfNode.data.preprocessorView && 
+                rfNode.data.preprocessorView.param_expressions && 
+                rfNode.data.preprocessorView.param_expressions[name] &&
+                rfNode.data.preprocessorView.param_expressions[name].expr) {
+              return rfNode.data.preprocessorView.param_expressions[name].expr;
+            }
+            
+            return '<expression (source not available)>';
+          }
+          
+          // Handle default parameters: show the default value from configuration
+          if (type === 'default') {
+            const rfNode = rfNodes.find(n => n.id === nodeId);
+            if (!rfNode || !rfNode.data || !rfNode.data.defaultParamValues) return undefined;
+            const defVal = rfNode.data.defaultParamValues[name];
+            if (defVal === undefined) return undefined;
+            
+            // Format the default value nicely
+            if (defVal && typeof defVal === 'object') {
+              if (defVal.repr) return String(defVal.repr);
+              try { return JSON.stringify(defVal); } catch (e) { return String(defVal); }
+            }
+            // Preserve float representation for numbers
+            if (typeof defVal === 'number') {
+              const repr = formatNumber(defVal);
+              return repr.length > 40 ? repr.substring(0, 40) + '...' : repr;
+            }
+            try { 
+              const repr = String(defVal);
+              return repr.length > 40 ? repr.substring(0, 40) + '...' : repr;
+            } catch (e) { 
+              return ''; 
+            }
+          }
+          
+          // For other types, use trace data
+          if (!traceAvailable) return undefined;
           const currentNode = nodeMap[parseInt(nodeId)];
           if (!currentNode) return undefined;
 
@@ -1574,6 +1668,29 @@
           if (!rawData || rawData.record_type !== 'ser') return undefined;
 
           if (type === 'param') {
+            // First try to get from node data (config parameters)
+            const rfNode = rfNodes.find(n => n.id === nodeId);
+            if (rfNode && rfNode.data && rfNode.data.configParamValues) {
+              const configVal = rfNode.data.configParamValues[name];
+              if (configVal !== undefined) {
+                if (configVal && typeof configVal === 'object') {
+                  if (configVal.repr) return String(configVal.repr);
+                  try { return JSON.stringify(configVal); } catch (e) { return String(configVal); }
+                }
+                if (typeof configVal === 'number') {
+                  const repr = formatNumber(configVal);
+                  return repr.length > 40 ? repr.substring(0, 40) + '...' : repr;
+                }
+                try {
+                  const repr = String(configVal);
+                  return repr.length > 40 ? repr.substring(0, 40) + '...' : repr;
+                } catch (e) {
+                  return '';
+                }
+              }
+            }
+            
+            // Fallback to trace data
             if (!rawData.processor || !rawData.processor.parameters) return undefined;
             let pval = rawData.processor.parameters[name];
             if (pval === undefined) pval = rawData.processor.parameters[name && name.toString ? name.toString() : name];
@@ -1584,7 +1701,7 @@
             }
             // Preserve float representation for numbers
             if (typeof pval === 'number') {
-              const repr = Number.isInteger(pval) && pval % 1 === 0 ? pval.toFixed(1) : String(pval);
+              const repr = formatNumber(pval);
               return repr.length > 40 ? repr.substring(0, 40) + '...' : repr;
             }
             try { 
@@ -1607,7 +1724,7 @@
         } catch (err) {
           return undefined;
         }
-      }, [traceAvailable, nodeMap, traceMeta, traceLabelToUuid, nodeTraceEvents, currentRun]);
+      }, [traceAvailable, nodeMap, traceMeta, traceLabelToUuid, nodeTraceEvents, currentRun, rfNodes]);
 
       const onNodeClick = (_, node) => {
         console.log('Node clicked:', node);
@@ -1821,80 +1938,49 @@
                     Invalid Pipeline
                   </span>
                 )}
-                {traceAvailable && traceMeta && (
-                  <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                        <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                          Pipeline_run_id: <span style={{ fontWeight: 'bold' }}>{truncateHash(traceMeta.run_id)}</span>
-                        </div>
-                        <div style={{ fontFamily: 'monospace', fontSize: '12px' }}>
-                          Pipeline ID: <span style={{ fontWeight: 'bold' }}>{truncateHash(traceMeta.pipeline_id)}</span>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.run_id)} style={{ padding: '4px 8px' }}>Copy run_id</button>
-                        <button onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.pipeline_id)} style={{ padding: '4px 8px' }}>Copy pipeline_id</button>
-                        <button
-                          onClick={() => setTraceOverlayVisible(!traceOverlayVisible)}
-                          style={{
-                            background: traceOverlayVisible ? '#28a745' : '#6c757d',
-                            color: 'white',
-                            border: 'none',
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {traceOverlayVisible ? 'Hide' : 'Show'} Overlay
-                        </button>
-                      </div>
+                {traceAvailable && traceMeta && runs && runs.length > 1 && (
+                  <div style={{ marginLeft: 'auto' }}>
+                    <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
+                      <label style={{fontSize:'12px', opacity:0.7, fontWeight:'500'}}>Run:</label>
+                      <select
+                        value={currentRun || ''}
+                        onChange={(e) => {
+                          // Save current scroll position (detail panel if scrollable, else window)
+                          const el = detailPanelRef.current;
+                          const isDetailScrollable = !!(el && (el.scrollHeight - el.clientHeight > 4));
+                          if (isDetailScrollable && el) {
+                            scrollRestoreRef.current = { mode: 'detail', detailTop: el.scrollTop, windowTop: window.scrollY };
+                          } else {
+                            scrollRestoreRef.current = { mode: 'window', detailTop: 0, windowTop: window.scrollY };
+                          }
+
+                          // Lock the current height of the Trace section with a smooth height transition
+                          const traceEl = traceSectionRef.current;
+                          if (traceEl) {
+                            const h = traceEl.getBoundingClientRect().height;
+                            traceEl.style.height = `${Math.max(0, Math.floor(h))}px`;
+                            traceEl.style.overflow = 'hidden';
+                            traceEl.style.transition = 'height 280ms ease';
+                            scrollRestoreRef.current.traceLocked = true;
+                            scrollRestoreRef.current.unlockDeadline = Date.now() + 1000; // give content up to 1s to arrive
+                          }
+
+                          const id = e.target.value || null;
+                          setCurrentRun(id);
+                          const u = new URL(window.location.href);
+                          if (id) u.searchParams.set('run', id); else u.searchParams.delete('run');
+                          window.history.replaceState({}, '', u.toString());
+                          // Keep stale node events visible; they'll be replaced as new run data arrives
+                        }}
+                        style={{fontSize:'13px', padding:'4px 8px', fontWeight:'500'}}
+                      >
+                        {runs.map(r => (
+                          <option key={r.run_id} value={r.run_id}>
+                            {(r.run_id || '').slice(0,8)} • {r.started_at || 'n/a'}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    {/* Run selector dropdown (second row) */}
-                    {runs && runs.length > 1 && (
-                      <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
-                        <label style={{fontSize:'12px', opacity:0.7}}>Run:</label>
-                        <select
-                          value={currentRun || ''}
-                          onChange={(e) => {
-                            // Save current scroll position (detail panel if scrollable, else window)
-                            const el = detailPanelRef.current;
-                            const isDetailScrollable = !!(el && (el.scrollHeight - el.clientHeight > 4));
-                            if (isDetailScrollable && el) {
-                              scrollRestoreRef.current = { mode: 'detail', detailTop: el.scrollTop, windowTop: window.scrollY };
-                            } else {
-                              scrollRestoreRef.current = { mode: 'window', detailTop: 0, windowTop: window.scrollY };
-                            }
-
-                            // Lock the current height of the Trace section with a smooth height transition
-                            const traceEl = traceSectionRef.current;
-                            if (traceEl) {
-                              const h = traceEl.getBoundingClientRect().height;
-                              traceEl.style.height = `${Math.max(0, Math.floor(h))}px`;
-                              traceEl.style.overflow = 'hidden';
-                              traceEl.style.transition = 'height 280ms ease';
-                              scrollRestoreRef.current.traceLocked = true;
-                              scrollRestoreRef.current.unlockDeadline = Date.now() + 1000; // give content up to 1s to arrive
-                            }
-
-                            const id = e.target.value || null;
-                            setCurrentRun(id);
-                            const u = new URL(window.location.href);
-                            if (id) u.searchParams.set('run', id); else u.searchParams.delete('run');
-                            window.history.replaceState({}, '', u.toString());
-                            // Keep stale node events visible; they'll be replaced as new run data arrives
-                          }}
-                          style={{fontSize:'12px', padding:'2px 4px'}}
-                        >
-                          {runs.map(r => (
-                            <option key={r.run_id} value={r.run_id}>
-                              {(r.run_id || '').slice(0,8)} • {r.started_at || 'n/a'}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
@@ -1924,6 +2010,256 @@
                 </p>
               )}
             </div>
+            {/* Pipeline Metadata Panel - Collapsible */}
+            {traceAvailable && traceMeta && (
+              <div style={{
+                borderBottom: '1px solid #ddd',
+                background: '#fafbfc'
+              }}>
+                <button
+                  onClick={() => setMetadataPanelOpen(!metadataPanelOpen)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 10px',
+                    background: 'transparent',
+                    border: 'none',
+                    borderBottom: metadataPanelOpen ? '2px solid #5856d6' : '1px solid #e0e0e0',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    color: '#5856d6',
+                    textAlign: 'left'
+                  }}
+                >
+                  <span style={{
+                    display: 'inline-block',
+                    width: '16px',
+                    height: '16px',
+                    lineHeight: '16px',
+                    textAlign: 'center',
+                    transition: 'transform 200ms ease',
+                    transform: metadataPanelOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                    fontSize: '12px'
+                  }}>▶</span>
+                  Pipeline Metadata
+                </button>
+                {metadataPanelOpen && (
+                  <div style={{
+                    padding: '12px 15px',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                    gap: '12px'
+                  }}>
+                    {/* Run Information Card */}
+                    <div style={{
+                      background: 'white',
+                      border: '1px solid #e0e0e0',
+                      borderRadius: '6px',
+                      padding: '12px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                    }}>
+                      <h4 style={{
+                        margin: '0 0 10px 0',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        color: '#333',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>Run Information</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+                        <div>
+                          <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Run ID</div>
+                          <div style={{ 
+                            fontFamily: 'monospace', 
+                            color: '#333', 
+                            wordBreak: 'break-all',
+                            padding: '4px 8px',
+                            background: '#f5f5f5',
+                            borderRadius: '4px',
+                            marginTop: '2px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between'
+                          }}>
+                            <span>{truncateHash(traceMeta.run_id)}</span>
+                            <button 
+                              onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.run_id)} 
+                              style={{ 
+                                padding: '2px 6px', 
+                                fontSize: '10px',
+                                background: '#e0e0e0',
+                                border: 'none',
+                                borderRadius: '3px',
+                                cursor: 'pointer',
+                                marginLeft: '6px'
+                              }}
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Pipeline ID</div>
+                          <div style={{ 
+                            fontFamily: 'monospace', 
+                            color: '#333', 
+                            wordBreak: 'break-all',
+                            padding: '4px 8px',
+                            background: '#f5f5f5',
+                            borderRadius: '4px',
+                            marginTop: '2px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between'
+                          }}>
+                            <span>{truncateHash(traceMeta.pipeline_id)}</span>
+                            <button 
+                              onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.pipeline_id)} 
+                              style={{ 
+                                padding: '2px 6px', 
+                                fontSize: '10px',
+                                background: '#e0e0e0',
+                                border: 'none',
+                                borderRadius: '3px',
+                                cursor: 'pointer',
+                                marginLeft: '6px'
+                              }}
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Identity Fingerprints Card */}
+                    <div style={{
+                      background: 'white',
+                      border: '1px solid #e0e0e0',
+                      borderRadius: '6px',
+                      padding: '12px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                    }}>
+                      <h4 style={{
+                        margin: '0 0 10px 0',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        color: '#333',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>Identity Fingerprints</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+                        {traceMeta.semantic_id && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Semantic ID (Structure)</div>
+                            <div style={{ 
+                              fontFamily: 'monospace', 
+                              color: '#333', 
+                              wordBreak: 'break-all',
+                              padding: '4px 8px',
+                              background: '#f5f5f5',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between'
+                            }}>
+                              <span>{truncateHash(traceMeta.semantic_id)}</span>
+                              <button 
+                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.semantic_id)} 
+                                style={{ 
+                                  padding: '2px 6px', 
+                                  fontSize: '10px',
+                                  background: '#e0e0e0',
+                                  border: 'none',
+                                  borderRadius: '3px',
+                                  cursor: 'pointer',
+                                  marginLeft: '6px'
+                                }}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {traceMeta.config_id && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Config ID (Configuration)</div>
+                            <div style={{ 
+                              fontFamily: 'monospace', 
+                              color: '#333', 
+                              wordBreak: 'break-all',
+                              padding: '4px 8px',
+                              background: '#f5f5f5',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between'
+                            }}>
+                              <span>{truncateHash(traceMeta.config_id)}</span>
+                              <button 
+                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.config_id)} 
+                                style={{ 
+                                  padding: '2px 6px', 
+                                  fontSize: '10px',
+                                  background: '#e0e0e0',
+                                  border: 'none',
+                                  borderRadius: '3px',
+                                  cursor: 'pointer',
+                                  marginLeft: '6px'
+                                }}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Controls Card */}
+                    <div style={{
+                      background: 'white',
+                      border: '1px solid #e0e0e0',
+                      borderRadius: '6px',
+                      padding: '12px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                    }}>
+                      <h4 style={{
+                        margin: '0 0 10px 0',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        color: '#333',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>Visualization</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <button
+                          onClick={() => setTraceOverlayVisible(!traceOverlayVisible)}
+                          style={{
+                            background: traceOverlayVisible ? '#28a745' : '#6c757d',
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 12px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            fontWeight: '600',
+                            transition: 'background 200ms ease'
+                          }}
+                        >
+                          {traceOverlayVisible ? '✓ Overlay Visible' : '✗ Overlay Hidden'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <CustomGraph 
               nodes={rfNodes} 
               edges={rfEdges} 
@@ -2067,6 +2403,75 @@
                     ) : (
                       <div className="prov-box" style={{ background: '#f8f9fa', borderLeft: '3px solid #666', color: '#666', fontStyle: 'italic' }}>
                         This node does not require any parameters.
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Derived Preprocessor Metadata Section */}
+                {nodeInfo.preprocessor_metadata && nodeInfo.preprocessor_metadata.type === 'derive.parameter_sweep' && (
+                  <div className="details-section">
+                    <h4 className="details-subheader">Derived Preprocessor: Parameter Sweep</h4>
+                    
+                    <div className="sv-card">
+                      <div className="sv-card-title">Sweep Configuration</div>
+                      <div className="sv-kv-grid">
+                        <div className="kv">
+                          <span className="k">Mode: </span>
+                          <span className="v">{nodeInfo.preprocessor_metadata.mode || 'combinatorial'}</span>
+                        </div>
+                        <div className="kv">
+                          <span className="k">Broadcast: </span>
+                          <span className="v">{nodeInfo.preprocessor_metadata.broadcast ? 'Yes' : 'No'}</span>
+                        </div>
+                        {nodeInfo.preprocessor_metadata.collection && (
+                          <div className="kv">
+                            <span className="k">Collection: </span>
+                            <span className="v mono">{nodeInfo.preprocessor_metadata.collection}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {nodeInfo.preprocessor_metadata.variables && Object.keys(nodeInfo.preprocessor_metadata.variables).length > 0 && (
+                      <div className="sv-card">
+                        <div className="sv-card-title">Variables</div>
+                        <div className="sv-kv-grid">
+                          {Object.entries(nodeInfo.preprocessor_metadata.variables).map(([varName, varDef]) => (
+                            <div key={varName} className="kv">
+                              <span className="k">{varName}: </span>
+                              <span className="v">
+                                {varDef.kind === 'range' ? (
+                                  `range(${formatNumber(varDef.lo)} → ${formatNumber(varDef.hi)}, ${varDef.steps} steps)`
+                                ) : varDef.kind === 'list' ? (
+                                  `list[${varDef.values ? varDef.values.length : 0} items]`
+                                ) : (
+                                  JSON.stringify(varDef)
+                                )}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {nodeInfo.preprocessor_metadata.param_expressions && Object.keys(nodeInfo.preprocessor_metadata.param_expressions).length > 0 && (
+                      <div className="sv-card">
+                        <div className="sv-card-title">Parameter Expressions</div>
+                        <div className="sv-kv-grid">
+                          {Object.entries(nodeInfo.preprocessor_metadata.param_expressions).map(([paramName, exprData]) => (
+                            <div key={paramName} className="kv">
+                              <span className="k">{paramName}: </span>
+                              <span className="v mono">
+                                {(nodeInfo.preprocessor_view && 
+                                  nodeInfo.preprocessor_view.param_expressions && 
+                                  nodeInfo.preprocessor_view.param_expressions[paramName] &&
+                                  nodeInfo.preprocessor_view.param_expressions[paramName].expr) || 
+                                 '<expression (source not available)>'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2237,8 +2642,7 @@
                                       valueRepr = paramValue.repr;
                                     } else if (typeof paramValue === 'number') {
                                       // Preserve float representation
-                                      valueRepr = Number.isInteger(paramValue) && paramValue % 1 === 0 ? 
-                                        paramValue.toFixed(1) : String(paramValue);
+                                      valueRepr = formatNumber(paramValue);
                                     } else {
                                       valueRepr = String(paramValue);
                                     }

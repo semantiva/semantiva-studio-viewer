@@ -22,6 +22,11 @@
       --output-light: #fff4e6;
       --output-border: #ffe0b3;
       
+      /* Sweep/Derived Colors */
+      --sweep-primary: #00b3b3;
+      --sweep-light: #e6fbfb;
+      --sweep-border: #6bd6d6;
+      
       /* System Colors */
       --neutral-primary: #48484a;
       --neutral-light: #f8f9fa;
