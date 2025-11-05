@@ -104,6 +104,25 @@ Studio now supports JSON/JSONL files that contain **multiple SER runs**.
 {"type":"ser","ids":{"run_id":"run-1","pipeline_id":"p"},"timing":{"start":"2025-01-01T00:00:05Z"},"status":"completed"}
 ```
 
+#### Run-Space Launch Filtering
+
+When traces contain **run-space metadata** (from parameter sweeps or fanout executions), the viewer provides:
+
+* **Run-Space dropdown**: Filter runs by `(launch_id, attempt)` pair
+  * **All**: Show all runs (default)
+  * **None**: Show only runs without run-space decoration (orphan runs)
+  * **Launch entries**: One option per unique `(launch_id, attempt)` with format:  
+    `<launch_id> · attempt <N> · <combine_mode> · <total_runs>`
+* **Deep-link support**: Share specific run-space views via URL  
+  `?launch=<launch_id>&attempt=<N>&run=<run_id>`
+* **Backward compatible**: Traces without run-space metadata work as before
+
+**Run-space fields in traces** (optional, from `pipeline_start` events):
+* `run_space_launch_id`: Unique identifier for the sweep/launch
+* `run_space_attempt`: Attempt number for retry/variant tracking
+* `run_space_index`: Position within the launch (for ordering)
+* `run_space_combine_mode`: How parameters were combined (`product`, `zip`, etc.)
+
 **Run Args panel** displays run-space parameters and other execution arguments:
 * `fanout.index`, `fanout.values`, `values_file_sha256`, etc.
 * Derived from `checks.why_ok.args` in SER records

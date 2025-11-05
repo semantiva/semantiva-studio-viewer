@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased] - TBD
 
 ### Added
+- **Run-Space Launch Selector**: New top-right dropdown to filter runs by run-space launch
+  - Displays all unique (launch_id, attempt) combinations found in traces
+  - Filters the Run dropdown to show only runs belonging to the selected launch
+  - Deep-link support via `?launch=<id>&attempt=<n>&run=<run_id>` query parameters
+  - "All" option to show all runs regardless of run-space
+  - "None" option to show only runs without run-space decoration (orphan runs)
+  - Graceful fallback for traces without run-space metadata (backward compatible)
+  - New backend API endpoints: `/api/runspace/launches` and `/api/runspace/runs`
 - **Initial Release**: Semantiva Studio Viewer package extracted from Semantiva core
 - **Pipeline Visualization**: Interactive web-based visualization for Semantiva pipelines
   - Dual-channel layout separating Data Processing and Context Processing operations

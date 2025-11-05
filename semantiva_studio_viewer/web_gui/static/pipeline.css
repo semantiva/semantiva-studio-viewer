@@ -884,3 +884,16 @@
     .sv-details > summary { cursor: pointer; color:#4b5563; font-size:12px; }
     .sv-json { background:#f9fafb; border:1px solid var(--neutral-border); padding:8px; border-radius:6px; max-height:180px; overflow:auto; font-size:11px; }
     .sv-subtitle { font-size:11px; color:#6b7280; padding: 0 10px; }
+
+    /* Run-Space selector styles */
+    select {
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+
+    select option {
+      text-overflow: ellipsis;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+

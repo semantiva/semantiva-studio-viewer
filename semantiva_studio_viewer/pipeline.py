@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+# Register run-space API router
 from semantiva import Pipeline, load_pipeline_from_yaml
 from semantiva.inspection import (
     build_pipeline_inspection,
@@ -30,8 +31,11 @@ from semantiva.inspection import (
     summary_report,
     extended_report,
 )
+from .runspace_api import router as runspace_router
 
 app = FastAPI()
+
+app.include_router(runspace_router)
 
 
 # Legacy trace detection removed - only SER format is supported
@@ -53,10 +57,19 @@ def _ensure_trace_loaded():
 
             app.state.trace_index = MultiTraceIndex.from_json_or_jsonl(trace_path)
             print(f"Lazy-loaded SER file: {trace_path}")
+
+            # Also initialize run-space aware index
+            from .trace_index_with_runspace import TraceIndexWithRunSpace
+
+            app.state.runspace_index = TraceIndexWithRunSpace(
+                app.state.trace_index, trace_path
+            )
+            print("Initialized run-space index")
         app.state.trace_loaded = True
     except Exception as e:
         print(f"Warning: Failed to lazy-load trace file {trace_path}: {e}")
         app.state.trace_index = None
+        app.state.runspace_index = None
         app.state.trace_loaded = True
 
 
@@ -402,6 +415,19 @@ def serve_pipeline(
                     print(
                         f"Single-run SER data loaded: {runs[0]['run_id'] if runs else 'unknown'}"
                     )
+
+                # Also initialize run-space aware index
+                from .trace_index_with_runspace import TraceIndexWithRunSpace
+
+                app.state.runspace_index = TraceIndexWithRunSpace(
+                    app.state.trace_index, trace_jsonl
+                )
+                launches, has_none = app.state.runspace_index.get_runspace_launches()
+                if launches:
+                    print(
+                        f"Run-space index initialized: {len(launches)} launch(es), has_orphans={has_none}"
+                    )
+
                 app.state.trace_loaded = True
         except ImportError:
             print("Warning: Trace indexing not available, trace file will be ignored")

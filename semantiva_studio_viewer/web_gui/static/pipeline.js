@@ -1152,6 +1152,11 @@
       // Multi-run state
       const [runs, setRuns] = useState([]);
       const [currentRun, setCurrentRun] = useState(null);
+
+      // Run-space state
+      const [runSpaces, setRunSpaces] = useState([]);
+      const [hasRunsWithoutRunSpace, setHasRunsWithoutRunSpace] = useState(false);
+      const [selectedRunSpace, setSelectedRunSpace] = useState('__all__');
       
   // Scroll preservation: detail panel or window
   const detailPanelRef = useRef(null);
@@ -1186,33 +1191,114 @@
       };
 
       useEffect(() => {
-        // Load runs if endpoint exists; in export mode this may throw and we simply proceed without runs.
-        fetch('/api/runs')
+        // Load run-space launches if endpoint exists
+        fetch('/api/runspace/launches')
           .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-          .then(list => {
-            setRuns(list || []);
-            // select from URL ?run=..., else first item
+          .then(data => {
+            setRunSpaces(data.launches || []);
+            setHasRunsWithoutRunSpace(data.has_runs_without_runspace || false);
+            
+            // Check URL for run-space deep-link
             const urlParams = new URLSearchParams(window.location.search);
-            const pre = urlParams.get('run');
-            const preNode = urlParams.get('node');
-            const chosen = (pre && (list || []).find(x => x.run_id === pre)) ? pre
-                          : ((list && list.length) ? list[0].run_id : null);
-            setCurrentRun(chosen);
-            if (chosen && pre !== chosen) {
-              const u = new URL(window.location.href);
-              u.searchParams.set('run', chosen);
-              if (preNode) u.searchParams.set('node', preNode);
-              window.history.replaceState({}, '', u.toString());
+            const launchParam = urlParams.get('launch');
+            const attemptParam = urlParams.get('attempt');
+            const noneParam = urlParams.get('none');
+
+            if (noneParam === 'true') {
+              setSelectedRunSpace('__none__');
+            } else if (launchParam && attemptParam) {
+              const matchingLaunch = (data.launches || []).find(
+                l => l.launch_id === launchParam && l.attempt === parseInt(attemptParam)
+              );
+              if (matchingLaunch) {
+                setSelectedRunSpace(JSON.stringify({
+                  launch: matchingLaunch.launch_id,
+                  attempt: matchingLaunch.attempt
+                }));
+              }
             }
-            if (preNode) setSelectedNodeId(preNode);
           })
           .catch(err => {
-            // No runs endpoint (export) or server without runs; continue without runs
-            console.log('Runs endpoint unavailable or empty:', err.message);
+            console.log('Run-space endpoint unavailable:', err.message);
+            setRunSpaces([]);
+            setHasRunsWithoutRunSpace(false);
+          });
+      }, []);
+
+      // Load runs based on run-space selection
+      const loadRunsForRunSpace = useCallback((runSpaceValue) => {
+        let url = '/api/runspace/runs';
+        
+        if (runSpaceValue === '__none__') {
+          url += '?none=true';
+        } else if (runSpaceValue !== '__all__') {
+          try {
+            const { launch, attempt } = JSON.parse(runSpaceValue);
+            url += `?launch_id=${encodeURIComponent(launch)}&attempt=${attempt}`;
+          } catch (e) {
+            console.error('Failed to parse run-space value:', e);
+            url = '/api/runspace/runs';
+          }
+        }
+
+        fetch(url)
+          .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+          .then(data => {
+            const runsList = data.runs || [];
+            setRuns(runsList);
+            
+            // Preserve current run if it's still in the list, otherwise select first
+            const urlParams = new URLSearchParams(window.location.search);
+            const preRun = urlParams.get('run');
+            const chosen = (preRun && runsList.find(x => x.run_id === preRun)) ? preRun
+                          : (runsList.length ? runsList[0].run_id : null);
+            setCurrentRun(chosen);
+          })
+          .catch(err => {
+            console.error('Failed to load runs for run-space:', err.message);
             setRuns([]);
             setCurrentRun(null);
           });
       }, []);
+
+      // Update runs when run-space selection changes
+      useEffect(() => {
+        if (runSpaces.length > 0 || hasRunsWithoutRunSpace) {
+          loadRunsForRunSpace(selectedRunSpace);
+        }
+      }, [selectedRunSpace, runSpaces, hasRunsWithoutRunSpace, loadRunsForRunSpace]);
+
+      useEffect(() => {
+        // Load runs if endpoint exists; in export mode this may throw and we simply proceed without runs.
+        // Only load directly if run-space endpoint is not available (backward compatibility)
+        if (runSpaces.length === 0 && !hasRunsWithoutRunSpace) {
+          fetch('/api/runs')
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+            .then(list => {
+              setRuns(list || []);
+              // select from URL ?run=..., else first item
+              const urlParams = new URLSearchParams(window.location.search);
+              const pre = urlParams.get('run');
+              const preNode = urlParams.get('node');
+              const chosen = (pre && (list || []).find(x => x.run_id === pre)) ? pre
+                            : ((list && list.length) ? list[0].run_id : null);
+              setCurrentRun(chosen);
+              if (chosen && pre !== chosen) {
+                const u = new URL(window.location.href);
+                u.searchParams.set('run', chosen);
+                if (preNode) u.searchParams.set('node', preNode);
+                window.history.replaceState({}, '', u.toString());
+              }
+              if (preNode) setSelectedNodeId(preNode);
+            })
+            .catch(err => {
+              // No runs endpoint (export) or server without runs; continue without runs
+              console.log('Runs endpoint unavailable or empty:', err.message);
+              setRuns([]);
+              setCurrentRun(null);
+            });
+        }
+      }, [runSpaces, hasRunsWithoutRunSpace]);
 
       useEffect(() => {
         console.log('Loading pipeline data...');
@@ -1938,10 +2024,61 @@
                     Invalid Pipeline
                   </span>
                 )}
-                {traceAvailable && traceMeta && runs && runs.length > 1 && (
-                  <div style={{ marginLeft: 'auto' }}>
-                    <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
-                      <label style={{fontSize:'12px', opacity:0.7, fontWeight:'500'}}>Run:</label>
+                {/* Run-Space selector and Run selector - stacked vertically on the right */}
+                {traceAvailable && (runSpaces.length > 0 || hasRunsWithoutRunSpace || (traceMeta && runs && runs.length > 1)) && (
+                  <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+                    {/* Run-Space selector */}
+                    {(runSpaces.length > 0 || hasRunsWithoutRunSpace) && (
+                      <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
+                        <label style={{fontSize:'12px', opacity:0.7, fontWeight:'500'}}>Run-Space:</label>
+                        <select
+                          value={selectedRunSpace}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setSelectedRunSpace(value);
+                            
+                            // Update URL params
+                            const u = new URL(window.location.href);
+                            if (value === '__all__') {
+                              u.searchParams.delete('launch');
+                              u.searchParams.delete('attempt');
+                              u.searchParams.delete('none');
+                            } else if (value === '__none__') {
+                              u.searchParams.delete('launch');
+                              u.searchParams.delete('attempt');
+                              u.searchParams.set('none', 'true');
+                            } else {
+                              try {
+                                const { launch, attempt } = JSON.parse(value);
+                                u.searchParams.set('launch', launch);
+                                u.searchParams.set('attempt', String(attempt));
+                                u.searchParams.delete('none');
+                              } catch (e) {
+                                console.error('Failed to parse run-space value:', e);
+                              }
+                            }
+                            u.searchParams.delete('run'); // Clear run selection when changing run-space
+                            window.history.replaceState({}, '', u.toString());
+                          }}
+                          style={{fontSize:'13px', padding:'4px 8px', fontWeight:'500', maxWidth: '300px'}}
+                        >
+                          <option value="__all__">All</option>
+                          {hasRunsWithoutRunSpace && <option value="__none__">None</option>}
+                          {runSpaces.map(rs => (
+                            <option 
+                              key={`${rs.launch_id}-${rs.attempt}`} 
+                              value={JSON.stringify({ launch: rs.launch_id, attempt: rs.attempt })}
+                            >
+                              {rs.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {/* Run selector */}
+                    {traceMeta && runs && runs.length > 1 && (
+                      <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
+                        <label style={{fontSize:'12px', opacity:0.7, fontWeight:'500'}}>Run:</label>
                       <select
                         value={currentRun || ''}
                         onChange={(e) => {
@@ -1981,6 +2118,7 @@
                         ))}
                       </select>
                     </div>
+                    )}
                   </div>
                 )}
               </div>
