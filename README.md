@@ -113,6 +113,12 @@ When traces contain **run-space metadata** (from parameter sweeps or fanout exec
   * **None**: Show only runs without run-space decoration (orphan runs)
   * **Launch entries**: One option per unique `(launch_id, attempt)` with format:  
     `<launch_id> · attempt <N> · <combine_mode> · <total_runs>`
+* **Run-Space Configuration Panel**: When a specific launch is selected, the Pipeline Metadata panel shows:
+  * **Identities**: Spec ID, Launch ID, Inputs ID (all copyable)
+  * **Configuration**: Combine mode, planned/total runs, max runs limit
+  * **Input Fingerprints**: Scrollable table with URI, digest, and size for each input
+  * **Planner Metadata**: Optional collapsible JSON view of planner details
+  * **Empty states**: Smart hints when "All" or "None" is selected
 * **Deep-link support**: Share specific run-space views via URL  
   `?launch=<launch_id>&attempt=<N>&run=<run_id>`
 * **Backward compatible**: Traces without run-space metadata work as before
@@ -122,6 +128,14 @@ When traces contain **run-space metadata** (from parameter sweeps or fanout exec
 * `run_space_attempt`: Attempt number for retry/variant tracking
 * `run_space_index`: Position within the launch (for ordering)
 * `run_space_combine_mode`: How parameters were combined (`product`, `zip`, etc.)
+
+**Run-space configuration** (from `run_space_start` event):
+* `run_space_spec_id`: Run-space specification identifier
+* `run_space_inputs_id`: Input dataset identifier
+* `run_space_input_fingerprints`: List of input file URIs, digests, and sizes
+* `run_space_planned_run_count`: Expected number of runs
+* `run_space_max_runs_limit`: Optional limit on execution
+* `summary.planner_meta`: Optional planner-specific metadata
 
 **Run Args panel** displays run-space parameters and other execution arguments:
 * `fanout.index`, `fanout.values`, `values_file_sha256`, etc.

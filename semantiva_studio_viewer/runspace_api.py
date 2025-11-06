@@ -98,3 +98,32 @@ def list_runs_for_launch(
             for r in runs
         ]
     }
+
+
+@router.get("/launch_details")
+def get_launch_details(
+    request: Request,
+    launch_id: str,
+    attempt: int,
+) -> Dict[str, Any]:
+    """Get detailed metadata for a specific run-space launch.
+
+    Args:
+        launch_id: Run-space launch ID
+        attempt: Run-space attempt number
+
+    Returns:
+        Dict containing launch details (spec_id, combine_mode, fingerprints, etc.)
+
+    Raises:
+        HTTPException: 404 if launch not found
+    """
+    idx = _get_runspace_index(request)
+
+    details = idx.get_launch_details(launch_id, attempt)
+    if not details:
+        raise HTTPException(status_code=404, detail="Run-space launch not found")
+
+    # Explicit type assertion to satisfy mypy
+    result: Dict[str, Any] = details
+    return result

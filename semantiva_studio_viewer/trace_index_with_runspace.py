@@ -163,6 +163,52 @@ class TraceIndexWithRunSpace:
         for key in self._runs_by_launch:
             self._launches[key]["total"] = len(self._runs_by_launch[key])
 
+    def _get_launch_metadata_from_trace(
+        self, launch_id: str, attempt: int
+    ) -> Optional[Dict[str, Any]]:
+        """Scan trace file for run_space_start event to get full metadata."""
+        if not self._trace_path:
+            return None
+
+        try:
+            if self._trace_path.endswith(".jsonl"):
+                with open(self._trace_path, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        if (
+                            rec.get("record_type") == "run_space_start"
+                            and rec.get("run_space_launch_id") == launch_id
+                            and rec.get("run_space_attempt") == attempt
+                        ):
+                            result: Dict[str, Any] = rec
+                            return result
+            else:
+                with open(self._trace_path, "r", encoding="utf-8") as fh:
+                    try:
+                        arr = json.load(fh)
+                    except Exception:
+                        return None
+                if isinstance(arr, list):
+                    for rec in arr:
+                        if (
+                            isinstance(rec, dict)
+                            and rec.get("record_type") == "run_space_start"
+                            and rec.get("run_space_launch_id") == launch_id
+                            and rec.get("run_space_attempt") == attempt
+                        ):
+                            result_dict: Dict[str, Any] = rec
+                            return result_dict
+        except Exception as e:
+            print(f"Warning: Failed to scan for launch metadata: {e}")
+        return None
+
     # ---- API consumed by runspace_api.py ----
     def get_runspace_launches(
         self,
@@ -186,3 +232,49 @@ class TraceIndexWithRunSpace:
             out.extend(self._runs_by_launch[key])
         # Keep stable order by .position
         return sorted(out, key=lambda r: r.position)
+
+    def get_launch_details(
+        self, launch_id: str, attempt: int
+    ) -> Optional[Dict[str, Any]]:
+        """Get detailed metadata for a specific run-space launch.
+
+        Returns dict with spec_id, combine_mode, fingerprints, planner_meta, etc.
+        Returns None if launch not found.
+        """
+        # Check if launch exists
+        key = (launch_id, attempt)
+        if key not in self._launches:
+            return None
+
+        # Get launch aggregate from base aggregator
+        launch_agg = self._base._agg.get_launch(launch_id, attempt)
+        if not launch_agg:
+            return None
+
+        # Get additional metadata from raw trace (combine_mode, max_runs_limit, summary)
+        trace_meta = self._get_launch_metadata_from_trace(launch_id, attempt)
+
+        # Get total runs from our index
+        total_runs = self._launches[key]["total"]
+
+        result: Dict[str, Any] = {
+            "launch_id": launch_id,
+            "attempt": attempt,
+            "spec_id": launch_agg.run_space_spec_id,
+            "combine_mode": (
+                trace_meta.get("run_space_combine_mode") if trace_meta else None
+            ),
+            "total_runs": int(total_runs),
+            "planned_run_count": launch_agg.planned_run_count,
+            "max_runs_limit": (
+                trace_meta.get("run_space_max_runs_limit") if trace_meta else None
+            ),
+            "inputs_id": launch_agg.run_space_inputs_id,
+            "fingerprints": launch_agg.input_fingerprints or [],
+            "planner_meta": (
+                trace_meta.get("summary", {}).get("planner_meta")
+                if trace_meta
+                else None
+            ),
+        }
+        return result

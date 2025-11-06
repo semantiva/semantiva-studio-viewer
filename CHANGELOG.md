@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased] - TBD
 
 ### Added
+- **Run-Space Configuration Panel**: Pipeline Metadata panel now displays run-space configuration
+  - Shows run-space identities (Spec ID, Launch ID, Inputs ID) with copyable values
+  - Displays configuration (combine mode, planned/total runs, max runs limit)
+  - Interactive fingerprints table with copyable digests and file details
+  - Optional planner metadata (collapsible JSON viewer)
+  - New backend endpoint: `/api/runspace/launch_details`
+  - Smart empty states for "All" and "None" run-space selections
 - **Run-Space Launch Selector**: New top-right dropdown to filter runs by run-space launch
   - Displays all unique (launch_id, attempt) combinations found in traces
   - Filters the Run dropdown to show only runs belonging to the selected launch

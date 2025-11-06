@@ -1157,6 +1157,7 @@
       const [runSpaces, setRunSpaces] = useState([]);
       const [hasRunsWithoutRunSpace, setHasRunsWithoutRunSpace] = useState(false);
       const [selectedRunSpace, setSelectedRunSpace] = useState('__all__');
+      const [runSpaceDetails, setRunSpaceDetails] = useState(null);
       
   // Scroll preservation: detail panel or window
   const detailPanelRef = useRef(null);
@@ -1267,6 +1268,30 @@
           loadRunsForRunSpace(selectedRunSpace);
         }
       }, [selectedRunSpace, runSpaces, hasRunsWithoutRunSpace, loadRunsForRunSpace]);
+
+      // Load run-space details when selection changes
+      useEffect(() => {
+        if (selectedRunSpace === '__all__' || selectedRunSpace === '__none__') {
+          setRunSpaceDetails(null);
+          return;
+        }
+
+        try {
+          const { launch, attempt } = JSON.parse(selectedRunSpace);
+          fetch(`/api/runspace/launch_details?launch_id=${encodeURIComponent(launch)}&attempt=${attempt}`)
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+            .then(details => {
+              setRunSpaceDetails(details);
+            })
+            .catch(err => {
+              console.error('Failed to load run-space details:', err);
+              setRunSpaceDetails(null);
+            });
+        } catch (e) {
+          console.error('Failed to parse run-space value:', e);
+          setRunSpaceDetails(null);
+        }
+      }, [selectedRunSpace]);
 
       useEffect(() => {
         // Load runs if endpoint exists; in export mode this may throw and we simply proceed without runs.
@@ -2358,6 +2383,326 @@
                         )}
                       </div>
                     </div>
+
+                    {/* Run-Space Card */}
+                    {(runSpaces.length > 0 || hasRunsWithoutRunSpace) && (
+                      <div style={{
+                        background: 'white',
+                        border: '1px solid #e0e0e0',
+                        borderRadius: '6px',
+                        padding: '12px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                        gridColumn: '1 / -1'  // Full width
+                      }}>
+                        <h4 style={{
+                          margin: '0 0 10px 0',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          color: '#333',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px'
+                        }}>Run-Space Configuration</h4>
+                        
+                        {selectedRunSpace === '__all__' && (
+                          <div style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>
+                            Select a specific run-space above to view its configuration.
+                          </div>
+                        )}
+                        
+                        {selectedRunSpace === '__none__' && (
+                          <div style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>
+                            This run has no run-space configuration.
+                          </div>
+                        )}
+                        
+                        {runSpaceDetails && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {/* IDs and basic info */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '8px', fontSize: '12px' }}>
+                              {runSpaceDetails.spec_id && (
+                                <div>
+                                  <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Spec ID</div>
+                                  <div style={{ 
+                                    fontFamily: 'monospace', 
+                                    color: '#333', 
+                                    wordBreak: 'break-all',
+                                    padding: '4px 8px',
+                                    background: '#f5f5f5',
+                                    borderRadius: '4px',
+                                    marginTop: '2px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between'
+                                  }}>
+                                    <span title={runSpaceDetails.spec_id}>{truncateHash(runSpaceDetails.spec_id)}</span>
+                                    <button 
+                                      onClick={() => navigator.clipboard && navigator.clipboard.writeText(runSpaceDetails.spec_id)} 
+                                      style={{ 
+                                        padding: '2px 6px', 
+                                        fontSize: '10px',
+                                        background: '#e0e0e0',
+                                        border: 'none',
+                                        borderRadius: '3px',
+                                        cursor: 'pointer',
+                                        marginLeft: '6px'
+                                      }}
+                                    >
+                                      Copy
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {runSpaceDetails.launch_id && (
+                                <div>
+                                  <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Launch ID</div>
+                                  <div style={{ 
+                                    fontFamily: 'monospace', 
+                                    color: '#333', 
+                                    wordBreak: 'break-all',
+                                    padding: '4px 8px',
+                                    background: '#f5f5f5',
+                                    borderRadius: '4px',
+                                    marginTop: '2px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between'
+                                  }}>
+                                    <span title={runSpaceDetails.launch_id}>{truncateHash(runSpaceDetails.launch_id)}</span>
+                                    <button 
+                                      onClick={() => navigator.clipboard && navigator.clipboard.writeText(runSpaceDetails.launch_id)} 
+                                      style={{ 
+                                        padding: '2px 6px', 
+                                        fontSize: '10px',
+                                        background: '#e0e0e0',
+                                        border: 'none',
+                                        borderRadius: '3px',
+                                        cursor: 'pointer',
+                                        marginLeft: '6px'
+                                      }}
+                                    >
+                                      Copy
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {runSpaceDetails.inputs_id && (
+                                <div>
+                                  <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Inputs ID</div>
+                                  <div style={{ 
+                                    fontFamily: 'monospace', 
+                                    color: '#333', 
+                                    wordBreak: 'break-all',
+                                    padding: '4px 8px',
+                                    background: '#f5f5f5',
+                                    borderRadius: '4px',
+                                    marginTop: '2px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between'
+                                  }}>
+                                    <span title={runSpaceDetails.inputs_id}>{truncateHash(runSpaceDetails.inputs_id)}</span>
+                                    <button 
+                                      onClick={() => navigator.clipboard && navigator.clipboard.writeText(runSpaceDetails.inputs_id)} 
+                                      style={{ 
+                                        padding: '2px 6px', 
+                                        fontSize: '10px',
+                                        background: '#e0e0e0',
+                                        border: 'none',
+                                        borderRadius: '3px',
+                                        cursor: 'pointer',
+                                        marginLeft: '6px'
+                                      }}
+                                    >
+                                      Copy
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              <div>
+                                <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Attempt</div>
+                                <div style={{ 
+                                  color: '#333', 
+                                  padding: '4px 8px',
+                                  background: '#f5f5f5',
+                                  borderRadius: '4px',
+                                  marginTop: '2px'
+                                }}>
+                                  {runSpaceDetails.attempt}
+                                </div>
+                              </div>
+                              
+                              {runSpaceDetails.combine_mode && (
+                                <div>
+                                  <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Combine Mode</div>
+                                  <div style={{ 
+                                    color: '#333', 
+                                    padding: '4px 8px',
+                                    background: '#f5f5f5',
+                                    borderRadius: '4px',
+                                    marginTop: '2px',
+                                    fontFamily: 'monospace'
+                                  }}>
+                                    {runSpaceDetails.combine_mode}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              <div>
+                                <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Planned / Total Runs</div>
+                                <div style={{ 
+                                  color: '#333', 
+                                  padding: '4px 8px',
+                                  background: '#f5f5f5',
+                                  borderRadius: '4px',
+                                  marginTop: '2px'
+                                }}>
+                                  {runSpaceDetails.planned_run_count != null ? runSpaceDetails.planned_run_count : '?'} / {runSpaceDetails.total_runs != null ? runSpaceDetails.total_runs : '?'}
+                                </div>
+                              </div>
+                              
+                              {runSpaceDetails.max_runs_limit && (
+                                <div>
+                                  <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Max Runs Limit</div>
+                                  <div style={{ 
+                                    color: '#333', 
+                                    padding: '4px 8px',
+                                    background: '#f5f5f5',
+                                    borderRadius: '4px',
+                                    marginTop: '2px'
+                                  }}>
+                                    {runSpaceDetails.max_runs_limit}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Fingerprints table */}
+                            {runSpaceDetails.fingerprints && runSpaceDetails.fingerprints.length > 0 && (
+                              <div>
+                                <div style={{ color: '#666', fontSize: '11px', fontWeight: '600', marginBottom: '6px' }}>Input Fingerprints</div>
+                                <div style={{ 
+                                  maxHeight: '200px', 
+                                  overflowY: 'auto', 
+                                  border: '1px solid #e0e0e0', 
+                                  borderRadius: '4px',
+                                  background: '#fafafa'
+                                }}>
+                                  <table style={{ 
+                                    width: '100%', 
+                                    fontSize: '11px', 
+                                    borderCollapse: 'collapse'
+                                  }}>
+                                    <thead style={{ position: 'sticky', top: 0, background: '#f0f0f0', borderBottom: '2px solid #ddd' }}>
+                                      <tr>
+                                        <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: '600' }}>URI</th>
+                                        <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: '600' }}>Digest</th>
+                                        <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: '600' }}>Size</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {runSpaceDetails.fingerprints.map((fp, idx) => (
+                                        <tr key={idx} style={{ borderBottom: '1px solid #e8e8e8' }}>
+                                          <td style={{ 
+                                            padding: '6px 8px', 
+                                            fontFamily: 'monospace', 
+                                            fontSize: '10px',
+                                            maxWidth: '250px',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap'
+                                          }} title={fp.uri}>
+                                            {fp.uri}
+                                          </td>
+                                          <td style={{ 
+                                            padding: '6px 8px', 
+                                            fontFamily: 'monospace', 
+                                            fontSize: '10px',
+                                            maxWidth: '150px',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis'
+                                          }}>
+                                            <span title={fp.digest}>{fp.digest ? fp.digest.slice(0, 16) + '...' : ''}</span>
+                                            {fp.digest && (
+                                              <button 
+                                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(fp.digest)} 
+                                                style={{ 
+                                                  padding: '1px 4px', 
+                                                  fontSize: '9px',
+                                                  background: '#e0e0e0',
+                                                  border: 'none',
+                                                  borderRadius: '2px',
+                                                  cursor: 'pointer',
+                                                  marginLeft: '4px'
+                                                }}
+                                              >
+                                                Copy
+                                              </button>
+                                            )}
+                                          </td>
+                                          <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                                            {fp.size ? fp.size.toLocaleString() : ''}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* Planner meta (collapsible) */}
+                            {runSpaceDetails.planner_meta && (
+                              <details style={{ marginTop: '8px' }}>
+                                <summary style={{ 
+                                  cursor: 'pointer', 
+                                  color: '#666', 
+                                  fontSize: '11px', 
+                                  fontWeight: '600',
+                                  userSelect: 'none'
+                                }}>
+                                  Planner Metadata (click to expand)
+                                </summary>
+                                <div style={{ 
+                                  marginTop: '6px',
+                                  padding: '8px',
+                                  background: '#f5f5f5',
+                                  borderRadius: '4px',
+                                  maxHeight: '200px',
+                                  overflowY: 'auto'
+                                }}>
+                                  <pre style={{ 
+                                    margin: 0, 
+                                    fontSize: '10px', 
+                                    fontFamily: 'monospace',
+                                    whiteSpace: 'pre-wrap',
+                                    wordBreak: 'break-word'
+                                  }}>
+                                    {JSON.stringify(runSpaceDetails.planner_meta, null, 2)}
+                                  </pre>
+                                  <button 
+                                    onClick={() => navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(runSpaceDetails.planner_meta, null, 2))} 
+                                    style={{ 
+                                      marginTop: '6px',
+                                      padding: '4px 8px', 
+                                      fontSize: '10px',
+                                      background: '#e0e0e0',
+                                      border: 'none',
+                                      borderRadius: '3px',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Copy JSON
+                                  </button>
+                                </div>
+                              </details>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Controls Card */}
                     <div style={{
