@@ -787,6 +787,10 @@
   function CustomGraph({ nodes, edges, onNodeClick, selectedNodeId, traceAvailable, traceOverlayVisible, getTraceAggForNode, getCalloutHoverText }) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [containerRef, setContainerRef] = useState(null);
+  const wrapperRef = React.useRef(null);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const draggingRef = React.useRef(false);
+  const lastPointer = React.useRef({ x: 0, y: 0 });
   // CoordinateSystem helper instance
   const csRef = React.useRef(null);
       const [anchorMap, setAnchorMap] = useState({});
@@ -863,6 +867,41 @@
       
       const handleResetZoom = () => {
         setZoomLevel(1);
+        // also reset pan to origin
+        setPan({ x: 0, y: 0 });
+      };
+
+      // Pointer-based panning (unconstrained)
+      const handlePointerDown = (e) => {
+        // Only left button
+        if (e.button !== undefined && e.button !== 0) return;
+        // Don't start panning when clicking interactive controls or nodes
+        const tgt = e.target;
+        if (tgt.closest && (tgt.closest('.custom-node') || tgt.closest('.zoom-controls') || tgt.closest('.pipeline-metadata'))) {
+          return;
+        }
+        draggingRef.current = true;
+        lastPointer.current = { x: e.clientX, y: e.clientY };
+        // capture pointer for consistent move events
+        try { e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId); } catch (ex) {}
+        if (wrapperRef.current) wrapperRef.current.style.cursor = 'grabbing';
+        e.preventDefault();
+      };
+
+      const handlePointerMove = (e) => {
+        if (!draggingRef.current) return;
+        const dx = e.clientX - lastPointer.current.x;
+        const dy = e.clientY - lastPointer.current.y;
+        // Adjust pan inversely by zoom so movement feels natural
+        setPan(prev => ({ x: prev.x + dx / zoomLevel, y: prev.y + dy / zoomLevel }));
+        lastPointer.current = { x: e.clientX, y: e.clientY };
+      };
+
+      const stopDragging = (e) => {
+        if (!draggingRef.current) return;
+        draggingRef.current = false;
+        try { e.target.releasePointerCapture && e.target.releasePointerCapture(e.pointerId); } catch (ex) {}
+        if (wrapperRef.current) wrapperRef.current.style.cursor = 'grab';
       };
 
       // When containerRef becomes available, initialize or set the container on csRef
@@ -890,7 +929,7 @@
           .filter(n => !(n.data.label.match(/Source|Sink/)))
           .map(n => anchorMap[n.id].node.width);
         const ctxWidths = nodes
-          .filter(n => n.data.label.match(/Context|Rename|Delete/))
+          .filter(n => n.data.componentType === 'ContextProcessor')
           .map(n => anchorMap[n.id].node.width);
         const configWidths = nodes.map(n => {
           const configParams = n.data.pipelineConfigParams || [];
@@ -929,21 +968,18 @@
       
       // Process all nodes in their original order, just split horizontally by type
       nodes.forEach((node, originalIndex) => {
-        const label = node.data.label || '';
         const componentType = node.data.componentType || '';
         let nodeType, xPos;
         
-        // Determine node category and horizontal position using component_type first, then fallback to name-based detection
-        if (componentType === 'PayloadSourceNode' || componentType === 'PayloadSinkNode' || 
-            label.includes('Source') || label.includes('Sink') || label.includes('DataSource') || label.includes('DataSink')) {
+        // Determine node category and horizontal position using component_type (semantic metadata only)
+        if (componentType === 'DataSource' || componentType === 'DataSink') {
           nodeType = 'source-sink';
           xPos = centerPosition;
-        } else if (componentType === 'ContextProcessorNode' || 
-                   label.includes('Context') || label.includes('Rename') || label.includes('Delete')) {
+        } else if (componentType === 'ContextProcessor') {
           nodeType = 'context-processor';
           xPos = rightChannelCenter;
         } else {
-          // DataOperationNode, ProbeResultCollectorNode, and other data processing nodes
+          // DataOperation and other data processing nodes
           nodeType = 'data-processor';
           xPos = leftChannelCenter;
         }
@@ -971,7 +1007,12 @@
             <button className="zoom-btn" onClick={handleZoomOut} title="Zoom Out">−</button>
           </div>
 
-          <div className="custom-graph-wrapper">
+          <div className="custom-graph-wrapper" ref={wrapperRef}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={stopDragging}
+            onPointerLeave={stopDragging}
+            style={{ cursor: 'grab' }}>
           <div
             ref={setContainerRef}
             className="custom-graph"
@@ -980,7 +1021,7 @@
               width: totalWidth,
               height: '100%',
               minHeight: `${Math.max(totalHeight * zoomLevel, 500)}px`,
-              transform: `scale(${zoomLevel})`,
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoomLevel})`,
               transformOrigin: '0 0',
               gridTemplateColumns: `${colWidths.config}px ${colWidths.data}px ${colWidths.context}px`,
               columnGap: `${LAYOUT_CONFIG.channelGap}px`,
@@ -1922,11 +1963,9 @@
               </h4>
               {Object.values(nodeMap)
                 .filter(n => {
-                  // Use component_type first, fallback to name-based detection
-                  const isSourceSink = n.component_type === 'PayloadSourceNode' || n.component_type === 'PayloadSinkNode' ||
-                                       n.label.includes('Source') || n.label.includes('Sink');
-                  const isContextProcessor = n.component_type === 'ContextProcessorNode' ||
-                                              n.label.includes('Context') || n.label.includes('Rename') || n.label.includes('Delete');
+                  // Use component_type semantic metadata only (no name-based fallbacks)
+                  const isSourceSink = n.component_type === 'DataSource' || n.component_type === 'DataSink';
+                  const isContextProcessor = n.component_type === 'ContextProcessor';
                   return !isSourceSink && !isContextProcessor;
                 })
                 .map(n => (
@@ -1963,10 +2002,7 @@
               </h4>
               {Object.values(nodeMap)
                 .filter(n => 
-                  n.component_type === 'ContextProcessorNode' ||
-                  n.label.includes('Context') || 
-                  n.label.includes('Rename') || 
-                  n.label.includes('Delete')
+                  n.component_type === 'ContextProcessor'
                 )
                 .map(n => (
                 <div 
@@ -2002,9 +2038,7 @@
               </h4>
               {Object.values(nodeMap)
                 .filter(n => 
-                  n.component_type === 'PayloadSourceNode' || n.component_type === 'PayloadSinkNode' ||
-                  n.label.includes('Source') || 
-                  n.label.includes('Sink')
+                  n.component_type === 'DataSource' || n.component_type === 'DataSink'
                 )
                 .map(n => (
                 <div 
