@@ -1214,6 +1214,9 @@
       const [traceLabelToUuid, setTraceLabelToUuid] = useState(new Map());
       const [nodeTraceEvents, setNodeTraceEvents] = useState(new Map());
       const [metadataPanelOpen, setMetadataPanelOpen] = useState(false);
+      
+      // Pipeline configuration data state (for metadata display)
+      const [pipelineData, setPipelineData] = useState(null);
 
       // Resizable panels
       const sidebar = useResizable(400, 200, 600);
@@ -1376,6 +1379,9 @@
           })
           .then(data => {
             console.log('Pipeline data loaded:', data);
+            
+            // Store complete pipeline data for metadata display
+            setPipelineData(data);
             
             // Store pipeline-level information
             setPipelineInfo(data.pipeline || { has_errors: false, pipeline_errors: [], required_context_keys: [] });
@@ -2208,7 +2214,7 @@
               )}
             </div>
             {/* Pipeline Metadata Panel - Collapsible */}
-            {traceAvailable && traceMeta && (
+            {(
               <div style={{
                 borderBottom: '1px solid #ddd',
                 background: '#fafbfc'
@@ -2250,7 +2256,174 @@
                     gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
                     gap: '12px'
                   }}>
-                    {/* Run Information Card */}
+                    {/* Configuration Identity Card - ALWAYS SHOWN */}
+                    <div style={{
+                      background: '#f8f9fa',
+                      border: '2px solid #d0d0d0',
+                      borderRadius: '6px',
+                      padding: '12px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                      gridColumn: '1 / -1'
+                    }}>
+                      <h4 style={{
+                        margin: '0 0 10px 0',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        color: '#555',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>Configuration Identity</h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '8px', fontSize: '12px' }}>
+                        {/* Configuration File */}
+                        {pipelineData && pipelineData.config_file && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Configuration File</div>
+                            <div style={{ 
+                              color: '#333', 
+                              padding: '4px 8px',
+                              background: '#ffffff',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              fontFamily: 'monospace',
+                              border: '1px solid #ddd',
+                              fontWeight: '600'
+                            }}>
+                              {pipelineData.config_file}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Pipeline ID */}
+                        {pipelineData && pipelineData.pipeline_id && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Pipeline ID</div>
+                            <div style={{ 
+                              fontFamily: 'monospace', 
+                              color: '#333', 
+                              wordBreak: 'break-all',
+                              padding: '4px 8px',
+                              background: '#ffffff',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              border: '1px solid #ddd'
+                            }}>
+                              <span>{truncateHash(pipelineData.pipeline_id)}</span>
+                              <button 
+                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(pipelineData.pipeline_id)} 
+                                style={{ 
+                                  padding: '2px 6px', 
+                                  fontSize: '10px',
+                                  background: '#e0e0e0',
+                                  border: 'none',
+                                  borderRadius: '3px',
+                                  cursor: 'pointer',
+                                  marginLeft: '6px'
+                                }}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Semantic ID */}
+                        {pipelineData && pipelineData.semantic_id && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Semantic ID (Structure)</div>
+                            <div style={{ 
+                              fontFamily: 'monospace', 
+                              color: '#333', 
+                              wordBreak: 'break-all',
+                              padding: '4px 8px',
+                              background: '#ffffff',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              border: '1px solid #ddd'
+                            }}>
+                              <span>{truncateHash(pipelineData.semantic_id)}</span>
+                              <button 
+                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(pipelineData.semantic_id)} 
+                                style={{ 
+                                  padding: '2px 6px', 
+                                  fontSize: '10px',
+                                  background: '#e0e0e0',
+                                  border: 'none',
+                                  borderRadius: '3px',
+                                  cursor: 'pointer',
+                                  marginLeft: '6px'
+                                }}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Config ID */}
+                        {pipelineData && pipelineData.config_id && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Config ID (Configuration)</div>
+                            <div style={{ 
+                              fontFamily: 'monospace', 
+                              color: '#333', 
+                              wordBreak: 'break-all',
+                              padding: '4px 8px',
+                              background: '#ffffff',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              border: '1px solid #ddd'
+                            }}>
+                              <span>{truncateHash(pipelineData.config_id)}</span>
+                              <button 
+                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(pipelineData.config_id)} 
+                                style={{ 
+                                  padding: '2px 6px', 
+                                  fontSize: '10px',
+                                  background: '#e0e0e0',
+                                  border: 'none',
+                                  borderRadius: '3px',
+                                  cursor: 'pointer',
+                                  marginLeft: '6px'
+                                }}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Required Context Keys */}
+                        {pipelineInfo && pipelineInfo.required_context_keys && pipelineInfo.required_context_keys.length > 0 && (
+                          <div style={{ gridColumn: '1 / -1' }}>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Required Context Keys</div>
+                            <div style={{ 
+                              color: '#333', 
+                              padding: '4px 8px',
+                              background: '#ffffff',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              border: '1px solid #ddd',
+                              fontFamily: 'monospace',
+                              fontSize: '11px'
+                            }}>
+                              {pipelineInfo.required_context_keys.join(', ')}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Runtime Execution Card - Only show when trace available */}
+                    {traceMeta && (
                     <div style={{
                       background: 'white',
                       border: '1px solid #e0e0e0',
@@ -2265,7 +2438,7 @@
                         color: '#333',
                         textTransform: 'uppercase',
                         letterSpacing: '0.5px'
-                      }}>Run Information</h4>
+                      }}>Runtime Execution</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
                         <div>
                           <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Run ID</div>
@@ -2298,129 +2471,96 @@
                             </button>
                           </div>
                         </div>
+                        
+                        {/* Timestamps */}
+                        {traceMeta.started_at && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Started</div>
+                            <div style={{ 
+                              color: '#333', 
+                              padding: '4px 8px',
+                              background: '#f5f5f5',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              fontFamily: 'monospace',
+                              fontSize: '11px'
+                            }}>
+                              {traceMeta.started_at}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {traceMeta.ended_at && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Ended</div>
+                            <div style={{ 
+                              color: '#333', 
+                              padding: '4px 8px',
+                              background: '#f5f5f5',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              fontFamily: 'monospace',
+                              fontSize: '11px'
+                            }}>
+                              {traceMeta.ended_at}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Status - if available */}
                         <div>
-                          <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Pipeline ID</div>
+                          <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Status</div>
                           <div style={{ 
-                            fontFamily: 'monospace', 
                             color: '#333', 
-                            wordBreak: 'break-all',
                             padding: '4px 8px',
                             background: '#f5f5f5',
                             borderRadius: '4px',
                             marginTop: '2px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between'
+                            fontSize: '11px',
+                            fontWeight: '600'
                           }}>
-                            <span>{truncateHash(traceMeta.pipeline_id)}</span>
-                            <button 
-                              onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.pipeline_id)} 
-                              style={{ 
-                                padding: '2px 6px', 
-                                fontSize: '10px',
-                                background: '#e0e0e0',
-                                border: 'none',
-                                borderRadius: '3px',
-                                cursor: 'pointer',
-                                marginLeft: '6px'
-                              }}
-                            >
-                              Copy
-                            </button>
+                            {traceMeta.ended_at ? 'Completed' : 'Running'}
+                          </div>
+                        </div>
+                        
+                        {/* Context Values - Always show if trace available */}
+                        <div style={{ gridColumn: '1 / -1' }}>
+                          <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Context Values</div>
+                          <div style={{ 
+                            fontFamily: 'monospace', 
+                            color: '#333', 
+                            padding: '4px 8px',
+                            background: '#f5f5f5',
+                            borderRadius: '4px',
+                            marginTop: '2px',
+                            fontSize: '11px',
+                            maxWidth: '100%',
+                            overflow: 'auto'
+                          }}>
+                            {traceMeta.run_space_context ? (
+                              Object.entries(traceMeta.run_space_context)
+                                .map(([k, v]) => {
+                                  // Handle objects by stringifying them
+                                  const valueStr = typeof v === 'object' && v !== null 
+                                    ? JSON.stringify(v) 
+                                    : String(v);
+                                  return `${k}: ${valueStr}`;
+                                })
+                                .join(', ')
+                            ) : traceMeta.pipeline_input_context_repr ? (
+                              traceMeta.pipeline_input_context_repr
+                            ) : (
+                              <span style={{ color: '#999', fontStyle: 'italic' }}>No context values available</span>
+                            )}
                           </div>
                         </div>
                       </div>
                     </div>
+                    )}
 
-                    {/* Identity Fingerprints Card */}
-                    <div style={{
-                      background: 'white',
-                      border: '1px solid #e0e0e0',
-                      borderRadius: '6px',
-                      padding: '12px',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                    }}>
-                      <h4 style={{
-                        margin: '0 0 10px 0',
-                        fontSize: '12px',
-                        fontWeight: '700',
-                        color: '#333',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px'
-                      }}>Identity Fingerprints</h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
-                        {traceMeta.semantic_id && (
-                          <div>
-                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Semantic ID (Structure)</div>
-                            <div style={{ 
-                              fontFamily: 'monospace', 
-                              color: '#333', 
-                              wordBreak: 'break-all',
-                              padding: '4px 8px',
-                              background: '#f5f5f5',
-                              borderRadius: '4px',
-                              marginTop: '2px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between'
-                            }}>
-                              <span>{truncateHash(traceMeta.semantic_id)}</span>
-                              <button 
-                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.semantic_id)} 
-                                style={{ 
-                                  padding: '2px 6px', 
-                                  fontSize: '10px',
-                                  background: '#e0e0e0',
-                                  border: 'none',
-                                  borderRadius: '3px',
-                                  cursor: 'pointer',
-                                  marginLeft: '6px'
-                                }}
-                              >
-                                Copy
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                        {traceMeta.config_id && (
-                          <div>
-                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Config ID (Configuration)</div>
-                            <div style={{ 
-                              fontFamily: 'monospace', 
-                              color: '#333', 
-                              wordBreak: 'break-all',
-                              padding: '4px 8px',
-                              background: '#f5f5f5',
-                              borderRadius: '4px',
-                              marginTop: '2px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between'
-                            }}>
-                              <span>{truncateHash(traceMeta.config_id)}</span>
-                              <button 
-                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.config_id)} 
-                                style={{ 
-                                  padding: '2px 6px', 
-                                  fontSize: '10px',
-                                  background: '#e0e0e0',
-                                  border: 'none',
-                                  borderRadius: '3px',
-                                  cursor: 'pointer',
-                                  marginLeft: '6px'
-                                }}
-                              >
-                                Copy
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Run-Space Card */}
-                    {(runSpaces.length > 0 || hasRunsWithoutRunSpace) && (
-                      <div style={{
+                    {/* Run-Space Configuration - Collapsible Section */}
+                    {((runSpaces.length > 0 || hasRunsWithoutRunSpace) || (pipelineData && pipelineData.run_space_config)) && (
+                      <details open style={{
                         background: 'white',
                         border: '1px solid #e0e0e0',
                         borderRadius: '6px',
@@ -2428,16 +2568,172 @@
                         boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
                         gridColumn: '1 / -1'  // Full width
                       }}>
-                        <h4 style={{
-                          margin: '0 0 10px 0',
-                          fontSize: '12px',
+                        <summary style={{
+                          cursor: 'pointer',
                           fontWeight: '700',
+                          fontSize: '12px',
                           color: '#333',
                           textTransform: 'uppercase',
-                          letterSpacing: '0.5px'
-                        }}>Run-Space Configuration</h4>
+                          letterSpacing: '0.5px',
+                          userSelect: 'none',
+                          listStyle: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}>
+                          <span style={{ fontSize: '10px' }}>▶</span>
+                          Run-Space Configuration
+                        </summary>
                         
-                        {selectedRunSpace === '__all__' && (
+                        <div style={{ marginTop: '12px' }}>
+                        
+                        {/* Show configuration from YAML if no trace-based run-space */}
+                        {!runSpaceDetails && pipelineData && pipelineData.run_space_config && (
+                          <div>
+                            {/* Parse and display expansions from run_space_config */}
+                            {(() => {
+                              const config = pipelineData.run_space_config;
+                              const blocks = config.blocks || [];
+                              const allExpansions = [];
+                              
+                              // Parse blocks and generate expansions
+                              blocks.forEach(block => {
+                                if (block.mode === 'by_position' && block.context) {
+                                  const keys = Object.keys(block.context);
+                                  const values = keys.map(k => block.context[k] || []);
+                                  const length = Math.max(...values.map(v => v.length));
+                                  
+                                  for (let i = 0; i < length; i++) {
+                                    const expansion = {};
+                                    keys.forEach(k => {
+                                      expansion[k] = block.context[k][i];
+                                    });
+                                    allExpansions.push(expansion);
+                                  }
+                                } else if (block.mode === 'combinatorial' && block.context) {
+                                  // Combinatorial expansion
+                                  const keys = Object.keys(block.context);
+                                  const values = keys.map(k => block.context[k] || []);
+                                  
+                                  const generateCombinations = (arrays) => {
+                                    if (arrays.length === 0) return [[]];
+                                    const first = arrays[0];
+                                    const rest = generateCombinations(arrays.slice(1));
+                                    const result = [];
+                                    first.forEach(item => {
+                                      rest.forEach(combo => {
+                                        result.push([item, ...combo]);
+                                      });
+                                    });
+                                    return result;
+                                  };
+                                  
+                                  const combinations = generateCombinations(values);
+                                  combinations.forEach(combo => {
+                                    const expansion = {};
+                                    keys.forEach((k, idx) => {
+                                      expansion[k] = combo[idx];
+                                    });
+                                    allExpansions.push(expansion);
+                                  });
+                                }
+                              });
+                              
+                              return (
+                                <div>
+                                  {/* Expansions Preview */}
+                                  {allExpansions.length > 0 && (
+                                    <details style={{ marginBottom: '12px' }}>
+                                      <summary style={{ 
+                                        cursor: 'pointer', 
+                                        color: '#666', 
+                                        fontSize: '11px', 
+                                        fontWeight: '600',
+                                        userSelect: 'none',
+                                        listStyle: 'none',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        marginBottom: '6px'
+                                      }}>
+                                        <span style={{ fontSize: '10px' }}>▶</span>
+                                        Expansions Preview (Showing {Math.min(30, allExpansions.length)} of {allExpansions.length})
+                                      </summary>
+                                      <div style={{ 
+                                        padding: '8px',
+                                        background: '#f5f5f5',
+                                        borderRadius: '4px',
+                                        maxHeight: '300px',
+                                        overflowY: 'auto',
+                                        fontSize: '11px',
+                                        fontFamily: 'monospace'
+                                      }}>
+                                        {allExpansions.slice(0, 30).map((exp, idx) => {
+                                          const line = Object.entries(exp)
+                                            .map(([k, v]) => `${k}=${v}`)
+                                            .join(', ');
+                                          return (
+                                            <div 
+                                              key={idx}
+                                              style={{
+                                                padding: '4px 0',
+                                                borderBottom: idx < Math.min(29, allExpansions.length - 1) ? '1px solid #e0e0e0' : 'none',
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                whiteSpace: 'nowrap'
+                                              }}
+                                              title={line}
+                                            >
+                                              {line}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </details>
+                                  )}
+                                  
+                                  {/* Full configuration (collapsed) */}
+                                  <details>
+                                    <summary style={{ 
+                                      cursor: 'pointer', 
+                                      color: '#666', 
+                                      fontSize: '11px', 
+                                      fontWeight: '600',
+                                      userSelect: 'none',
+                                      listStyle: 'none',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}>
+                                      <span style={{ fontSize: '10px' }}>▶</span>
+                                      Full Configuration
+                                    </summary>
+                                    <div style={{ 
+                                      padding: '8px',
+                                      background: '#f5f5f5',
+                                      borderRadius: '4px',
+                                      maxHeight: '300px',
+                                      overflowY: 'auto',
+                                      marginTop: '6px'
+                                    }}>
+                                      <pre style={{ 
+                                        margin: 0, 
+                                        fontSize: '11px', 
+                                        fontFamily: 'monospace',
+                                        whiteSpace: 'pre-wrap',
+                                        wordBreak: 'break-word'
+                                      }}>
+                                        {JSON.stringify(config, null, 2)}
+                                      </pre>
+                                    </div>
+                                  </details>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
+                        
+                        {selectedRunSpace === '__all__' && runSpaceDetails && (
                           <div style={{ color: '#666', fontSize: '12px', fontStyle: 'italic' }}>
                             Select a specific run-space above to view its configuration.
                           </div>
@@ -2451,8 +2747,12 @@
                         
                         {runSpaceDetails && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {/* IDs and basic info */}
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '8px', fontSize: '12px' }}>
+                            {/* Basic Information - Always Expanded */}
+                            <div>
+                              <div style={{ color: '#888', fontSize: '10px', fontWeight: '600', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                Basic Information
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '8px', fontSize: '12px' }}>
                               {runSpaceDetails.spec_id && (
                                 <div>
                                   <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Spec ID</div>
@@ -2612,12 +2912,27 @@
                                 </div>
                               )}
                             </div>
+                            </div>
                             
-                            {/* Fingerprints table */}
+                            {/* Input Fingerprints - Collapsible */}
                             {runSpaceDetails.fingerprints && runSpaceDetails.fingerprints.length > 0 && (
-                              <div>
-                                <div style={{ color: '#666', fontSize: '11px', fontWeight: '600', marginBottom: '6px' }}>Input Fingerprints</div>
+                              <details style={{ marginTop: '8px' }}>
+                                <summary style={{ 
+                                  cursor: 'pointer', 
+                                  color: '#666', 
+                                  fontSize: '11px', 
+                                  fontWeight: '600',
+                                  userSelect: 'none',
+                                  listStyle: 'none',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}>
+                                  <span style={{ fontSize: '10px' }}>▶</span>
+                                  Input Fingerprints ({runSpaceDetails.fingerprints.length})
+                                </summary>
                                 <div style={{ 
+                                  marginTop: '6px',
                                   maxHeight: '200px', 
                                   overflowY: 'auto', 
                                   border: '1px solid #e0e0e0', 
@@ -2684,10 +2999,10 @@
                                     </tbody>
                                   </table>
                                 </div>
-                              </div>
+                              </details>
                             )}
                             
-                            {/* Planner meta (collapsible) */}
+                            {/* Planner Metadata - Collapsible */}
                             {runSpaceDetails.planner_meta && (
                               <details style={{ marginTop: '8px' }}>
                                 <summary style={{ 
@@ -2695,9 +3010,14 @@
                                   color: '#666', 
                                   fontSize: '11px', 
                                   fontWeight: '600',
-                                  userSelect: 'none'
+                                  userSelect: 'none',
+                                  listStyle: 'none',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
                                 }}>
-                                  Planner Metadata (click to expand)
+                                  <span style={{ fontSize: '10px' }}>▶</span>
+                                  Planner Metadata
                                 </summary>
                                 <div style={{ 
                                   marginTop: '6px',
@@ -2735,10 +3055,11 @@
                             )}
                           </div>
                         )}
-                      </div>
+                        </div>
+                      </details>
                     )}
 
-                    {/* Controls Card */}
+                    {/* Controls Card - VISUALIZATION */}
                     <div style={{
                       background: 'white',
                       border: '1px solid #e0e0e0',

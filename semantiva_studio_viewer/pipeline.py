@@ -132,6 +132,78 @@ def get_pipeline_api():
             # app.state.config must be a list of dictionaries
             data = build_pipeline_json(app.state.config)
 
+            # Add configuration filename to response
+            if hasattr(app.state, "config_filename"):
+                data["config_file"] = app.state.config_filename
+
+            # Add run_space configuration if present in the raw YAML
+            if hasattr(app.state, "raw_yaml") and "run_space" in app.state.raw_yaml:
+                data["run_space_config"] = app.state.raw_yaml["run_space"]
+
+            # Compute static IDs from configuration if not available from trace
+            # These IDs should always be available, computed from the pipeline structure
+            import hashlib
+            import json as json_module
+
+            # Try to get IDs from trace first
+            has_trace_ids = False
+            # Try to get IDs from trace first
+            has_trace_ids = False
+            _ensure_trace_loaded()
+            trace_index = getattr(app.state, "trace_index", None)
+            if trace_index:
+                try:
+                    # Get default run metadata which contains static IDs
+                    default_run_id = trace_index.default_run_id()
+                    default_ser_index = trace_index.get(default_run_id)
+                    trace_meta = default_ser_index.get_meta()
+
+                    # Extract static IDs from trace metadata
+                    if "pipeline_id" in trace_meta:
+                        data["pipeline_id"] = trace_meta["pipeline_id"]
+                        has_trace_ids = True
+                    if "semantic_id" in trace_meta:
+                        data["semantic_id"] = trace_meta["semantic_id"]
+                    if "config_id" in trace_meta:
+                        data["config_id"] = trace_meta["config_id"]
+                except Exception as e:
+                    print(f"Warning: Could not extract IDs from trace: {e}")
+
+            # If no trace IDs, compute them from configuration
+            if not has_trace_ids:
+                try:
+                    # Create a stable representation of the pipeline structure
+                    pipeline_structure = {
+                        "nodes": [
+                            {
+                                "id": n.get("id"),
+                                "label": n.get("label"),
+                                "component_type": n.get("component_type"),
+                            }
+                            for n in data.get("nodes", [])
+                        ],
+                        "edges": data.get("edges", []),
+                    }
+                    structure_json = json_module.dumps(
+                        pipeline_structure, sort_keys=True
+                    )
+                    structure_hash = hashlib.sha256(structure_json.encode()).hexdigest()
+
+                    # For semantic_id: hash of structure only
+                    data["semantic_id"] = f"plsemid-{structure_hash[:40]}"
+
+                    # For config_id: hash of structure + parameters
+                    config_json = json_module.dumps(data, sort_keys=True, default=str)
+                    config_hash = hashlib.sha256(config_json.encode()).hexdigest()
+                    data["config_id"] = f"plcid-{config_hash}"
+
+                    # For pipeline_id: combination of both
+                    combined = f"{structure_hash}:{config_hash}"
+                    pipeline_hash = hashlib.sha256(combined.encode()).hexdigest()
+                    data["pipeline_id"] = f"plid-{pipeline_hash}"
+                except Exception as e:
+                    print(f"Warning: Could not compute IDs: {e}")
+
             # Enrich nodes with node_uuid when trace is loaded by positional identity
             _ensure_trace_loaded()
             trace_index = getattr(app.state, "trace_index", None)
@@ -387,6 +459,18 @@ def serve_pipeline(
         raise ValueError(f"Failed to load pipeline configuration: {e}")
 
     app.state.config = config
+    app.state.config_filename = yaml_file.name  # Store filename for metadata display
+
+    # Also load raw YAML to get run_space and other top-level config
+    try:
+        import yaml
+
+        with open(yaml_path, "r") as f:
+            app.state.raw_yaml = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Warning: Could not load raw YAML: {e}")
+        app.state.raw_yaml = {}
+
     app.state.trace_index = None
     app.state.trace_loaded = False
     # Keep the trace path so endpoints can attempt lazy-loading if needed
@@ -522,6 +606,16 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
         config = load_pipeline_from_yaml(yaml_path)
     except Exception as e:
         raise ValueError(f"Failed to load pipeline configuration: {e}")
+
+    # Also load raw YAML to get run_space configuration
+    raw_yaml = {}
+    try:
+        import yaml
+
+        with open(yaml_path, "r") as f:
+            raw_yaml = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Warning: Could not load raw YAML: {e}")
 
     # Load trace data if provided
     trace_data: dict[str, Any] = {}
@@ -688,6 +782,57 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
 
     # Only use configuration for build_pipeline_json
     data = build_pipeline_json(config)
+
+    # Add configuration filename to exported data
+    data["config_file"] = yaml_file.name
+
+    # Add run_space configuration if present in the raw YAML
+    if "run_space" in raw_yaml:
+        data["run_space_config"] = raw_yaml["run_space"]
+
+    # Add static IDs - prefer from trace, compute if not available
+    has_trace_ids = False
+    if trace_data and "meta" in trace_data:
+        if "pipeline_id" in trace_data["meta"]:
+            data["pipeline_id"] = trace_data["meta"]["pipeline_id"]
+            has_trace_ids = True
+        if "semantic_id" in trace_data["meta"]:
+            data["semantic_id"] = trace_data["meta"]["semantic_id"]
+        if "config_id" in trace_data["meta"]:
+            data["config_id"] = trace_data["meta"]["config_id"]
+
+    # Compute IDs if not in trace
+    if not has_trace_ids:
+        try:
+            import hashlib
+            import json as json_module
+
+            # Create stable pipeline structure representation
+            pipeline_structure = {
+                "nodes": [
+                    {
+                        "id": n.get("id"),
+                        "label": n.get("label"),
+                        "component_type": n.get("component_type"),
+                    }
+                    for n in data.get("nodes", [])
+                ],
+                "edges": data.get("edges", []),
+            }
+            structure_json = json_module.dumps(pipeline_structure, sort_keys=True)
+            structure_hash = hashlib.sha256(structure_json.encode()).hexdigest()
+
+            data["semantic_id"] = f"plsemid-{structure_hash[:40]}"
+
+            config_json = json_module.dumps(data, sort_keys=True, default=str)
+            config_hash = hashlib.sha256(config_json.encode()).hexdigest()
+            data["config_id"] = f"plcid-{config_hash}"
+
+            combined = f"{structure_hash}:{config_hash}"
+            pipeline_hash = hashlib.sha256(combined.encode()).hexdigest()
+            data["pipeline_id"] = f"plid-{pipeline_hash}"
+        except Exception as e:
+            print(f"Warning: Could not compute IDs: {e}")
 
     # If we have trace positional mapping, inject node_uuid into exported nodes too
     if trace_data and "meta" in trace_data:

@@ -61,6 +61,9 @@ class CoreTraceIndex:
     _agg: TraceAggregator
     _events_by_node: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     canonical_nodes: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    _pipeline_start_record: Optional[Dict[str, Any]] = (
+        None  # Store pipeline_start for context
+    )
 
     # ----- public API used by pipeline.py endpoints -----
     def get_meta(self) -> Dict[str, Any]:
@@ -86,6 +89,11 @@ class CoreTraceIndex:
         config_id = meta.get("config_id") or pipeline_config_id
         node_semantic_ids = meta.get("node_semantic_ids", {})
 
+        # Extract run_space_context from pipeline_start record if available
+        run_space_context = {}
+        if self._pipeline_start_record:
+            run_space_context = self._pipeline_start_record.get("run_space_context", {})
+
         return {
             "run_id": run.run_id,
             "pipeline_id": run.pipeline_id,
@@ -94,6 +102,7 @@ class CoreTraceIndex:
             "node_semantic_ids": node_semantic_ids,
             "started_at": run.start_timestamp,
             "ended_at": run.end_timestamp,
+            "run_space_context": run_space_context,
             "node_mappings": {
                 "index_to_uuid": idx_to_uuid,
                 "uuid_to_index": uuid_to_idx,
@@ -239,7 +248,7 @@ class MultiTraceIndex:
                 for rec in arr:
                     if isinstance(rec, dict):
                         _ingest_and_buffer(agg, mti, rec)
-        # build per-run adapters
+        # build per-run adapters (preserve existing ones with stored data)
         for run in agg.iter_runs():
             if run.run_id not in mti.by_run:
                 mti.by_run[run.run_id] = CoreTraceIndex(run.run_id, agg)
@@ -320,3 +329,11 @@ def _ingest_and_buffer(
     else:
         # Non-SER records (pipeline_start, pipeline_end, etc.)
         agg.ingest(rec)
+        # Store pipeline_start record for context extraction
+        if rec.get("record_type") == "pipeline_start":
+            rid = rec.get("run_id")
+            if rid:
+                # Create CoreTraceIndex if it doesn't exist yet
+                if rid not in mti.by_run:
+                    mti.by_run[rid] = CoreTraceIndex(rid, agg)
+                mti.by_run[rid]._pipeline_start_record = rec
