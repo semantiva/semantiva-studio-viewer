@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse
 # Register run-space API router
 from semantiva import Pipeline, load_pipeline_from_yaml
 from semantiva.inspection import (
+    build,
     build_pipeline_inspection,
     json_report,
     summary_report,
@@ -91,13 +92,13 @@ def build_pipeline_json(config: list[dict]) -> dict:
         config: Raw configuration data (List[Dict]).
 
     Returns:
-        Dictionary containing nodes and edges data for web visualization
+        Dictionary containing nodes and edges data for web visualization,
+        with identity payload from inspection.build()
 
     Note:
-        This function replaces the previous direct pipeline analysis with
-        a call to the inspection system's json_report() function, ensuring
-        consistency across all pipeline introspection tools. It can handle
-        invalid configurations that would fail during Pipeline construction.
+        This function uses inspection.build() to get the official identity payload
+        (semantic_id, config_id, run_space.spec_id) and json_report() for visualization.
+        Never emits runtime IDs (pipeline_id, run_id) in inspection mode.
     """
     # Use the Semantiva's inspection system for consistent data generation
     inspection = build_pipeline_inspection(config)
@@ -113,7 +114,25 @@ def build_pipeline_json(config: list[dict]) -> dict:
 
     # Convert inspection data to JSON format suitable for web visualization
     # and normalize via jsonable_encoder to ensure full JSON-serializability
-    return jsonable_encoder(json_report(inspection))
+    result = jsonable_encoder(json_report(inspection))
+
+    # CRITICAL: Get identity from inspection.build() - the ONLY official source
+    identity_payload = build(config)
+    if "identity" in identity_payload:
+        result["identity"] = identity_payload["identity"]
+        # Ensure run_space exists and inputs_id is None at inspection (never available)
+        if (
+            "run_space" not in result["identity"]
+            or result["identity"]["run_space"] is None
+        ):
+            result["identity"]["run_space"] = {}
+        result["identity"]["run_space"]["inputs_id"] = None
+
+    # If build() carries pipeline_spec_canonical, prefer it
+    if "pipeline_spec_canonical" in identity_payload:
+        result["pipeline_spec_canonical"] = identity_payload["pipeline_spec_canonical"]
+
+    return result
 
 
 @app.get("/api/pipeline")
@@ -121,10 +140,15 @@ def get_pipeline_api():
     """Get pipeline data as JSON.
 
     Returns:
-        Dict containing nodes and edges for pipeline visualization
+        Dict containing nodes and edges for pipeline visualization,
+        with identity from inspection.build() (YAML SSOT only)
 
     Raises:
         HTTPException: If pipeline is not loaded or processing fails
+
+    Note:
+        INSPECTION MODE: Returns only YAML-based identities (semantic_id, config_id, run_space.spec_id).
+        NEVER exposes runtime IDs (pipeline_id, run_id) - those come from /api/trace/meta.
     """
     try:
         # Only configuration data is supported now
@@ -140,69 +164,19 @@ def get_pipeline_api():
             if hasattr(app.state, "raw_yaml") and "run_space" in app.state.raw_yaml:
                 data["run_space_config"] = app.state.raw_yaml["run_space"]
 
-            # Compute static IDs from configuration if not available from trace
-            # These IDs should always be available, computed from the pipeline structure
-            import hashlib
-            import json as json_module
+            # Ensure identity structure exists (should be from build_pipeline_json)
+            if "identity" not in data:
+                data["identity"] = {}
+            if "run_space" not in data["identity"]:
+                data["identity"]["run_space"] = {}
+            # INSPECTION MODE: inputs_id is always None (never available at this time)
+            data["identity"]["run_space"]["inputs_id"] = None
 
-            # Try to get IDs from trace first
-            has_trace_ids = False
-            # Try to get IDs from trace first
-            has_trace_ids = False
-            _ensure_trace_loaded()
-            trace_index = getattr(app.state, "trace_index", None)
-            if trace_index:
-                try:
-                    # Get default run metadata which contains static IDs
-                    default_run_id = trace_index.default_run_id()
-                    default_ser_index = trace_index.get(default_run_id)
-                    trace_meta = default_ser_index.get_meta()
-
-                    # Extract static IDs from trace metadata
-                    if "pipeline_id" in trace_meta:
-                        data["pipeline_id"] = trace_meta["pipeline_id"]
-                        has_trace_ids = True
-                    if "semantic_id" in trace_meta:
-                        data["semantic_id"] = trace_meta["semantic_id"]
-                    if "config_id" in trace_meta:
-                        data["config_id"] = trace_meta["config_id"]
-                except Exception as e:
-                    print(f"Warning: Could not extract IDs from trace: {e}")
-
-            # If no trace IDs, compute them from configuration
-            if not has_trace_ids:
-                try:
-                    # Create a stable representation of the pipeline structure
-                    pipeline_structure = {
-                        "nodes": [
-                            {
-                                "id": n.get("id"),
-                                "label": n.get("label"),
-                                "component_type": n.get("component_type"),
-                            }
-                            for n in data.get("nodes", [])
-                        ],
-                        "edges": data.get("edges", []),
-                    }
-                    structure_json = json_module.dumps(
-                        pipeline_structure, sort_keys=True
-                    )
-                    structure_hash = hashlib.sha256(structure_json.encode()).hexdigest()
-
-                    # For semantic_id: hash of structure only
-                    data["semantic_id"] = f"plsemid-{structure_hash[:40]}"
-
-                    # For config_id: hash of structure + parameters
-                    config_json = json_module.dumps(data, sort_keys=True, default=str)
-                    config_hash = hashlib.sha256(config_json.encode()).hexdigest()
-                    data["config_id"] = f"plcid-{config_hash}"
-
-                    # For pipeline_id: combination of both
-                    combined = f"{structure_hash}:{config_hash}"
-                    pipeline_hash = hashlib.sha256(combined.encode()).hexdigest()
-                    data["pipeline_id"] = f"plid-{pipeline_hash}"
-                except Exception as e:
-                    print(f"Warning: Could not compute IDs: {e}")
+            # Extract required_context_keys if available
+            if "pipeline_spec_canonical" in data:
+                spec = data["pipeline_spec_canonical"]
+                if isinstance(spec, dict) and "required_context_keys" in spec:
+                    data["required_context_keys"] = spec["required_context_keys"]
 
             # Enrich nodes with node_uuid when trace is loaded by positional identity
             _ensure_trace_loaded()
@@ -259,9 +233,18 @@ def _get_trace_index_for_run(run: str | None):
         raise HTTPException(status_code=404, detail="No trace data available.")
     # ti is always MultiTraceIndex now
     try:
-        return ti.get(run)
+        idx = ti.get(run)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    # If the underlying index returned None (no such run), convert to 404
+    if idx is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(f"Run not found: {run}" if run else "No run available"),
+        )
+
+    return idx
 
 
 @app.get("/api/runs")
@@ -790,49 +773,12 @@ def export_pipeline(yaml_path: str, output_path: str, trace_jsonl: str | None = 
     if "run_space" in raw_yaml:
         data["run_space_config"] = raw_yaml["run_space"]
 
-    # Add static IDs - prefer from trace, compute if not available
-    has_trace_ids = False
-    if trace_data and "meta" in trace_data:
-        if "pipeline_id" in trace_data["meta"]:
-            data["pipeline_id"] = trace_data["meta"]["pipeline_id"]
-            has_trace_ids = True
-        if "semantic_id" in trace_data["meta"]:
-            data["semantic_id"] = trace_data["meta"]["semantic_id"]
-        if "config_id" in trace_data["meta"]:
-            data["config_id"] = trace_data["meta"]["config_id"]
-
-    # Compute IDs if not in trace
-    if not has_trace_ids:
-        try:
-            import hashlib
-            import json as json_module
-
-            # Create stable pipeline structure representation
-            pipeline_structure = {
-                "nodes": [
-                    {
-                        "id": n.get("id"),
-                        "label": n.get("label"),
-                        "component_type": n.get("component_type"),
-                    }
-                    for n in data.get("nodes", [])
-                ],
-                "edges": data.get("edges", []),
-            }
-            structure_json = json_module.dumps(pipeline_structure, sort_keys=True)
-            structure_hash = hashlib.sha256(structure_json.encode()).hexdigest()
-
-            data["semantic_id"] = f"plsemid-{structure_hash[:40]}"
-
-            config_json = json_module.dumps(data, sort_keys=True, default=str)
-            config_hash = hashlib.sha256(config_json.encode()).hexdigest()
-            data["config_id"] = f"plcid-{config_hash}"
-
-            combined = f"{structure_hash}:{config_hash}"
-            pipeline_hash = hashlib.sha256(combined.encode()).hexdigest()
-            data["pipeline_id"] = f"plid-{pipeline_hash}"
-        except Exception as e:
-            print(f"Warning: Could not compute IDs: {e}")
+    # Identity is already in data from build_pipeline_json (uses inspection.build)
+    # Ensure required_context_keys is populated if available
+    if "pipeline_spec_canonical" in data:
+        spec = data["pipeline_spec_canonical"]
+        if isinstance(spec, dict) and "required_context_keys" in spec:
+            data["required_context_keys"] = spec["required_context_keys"]
 
     # If we have trace positional mapping, inject node_uuid into exported nodes too
     if trace_data and "meta" in trace_data:

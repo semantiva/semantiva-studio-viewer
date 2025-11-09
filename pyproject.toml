@@ -6,7 +6,7 @@ license = "Apache-2.0"
 readme = "README.md"
 requires-python = ">=3.10.12"
 dependencies = [
-    "semantiva>=0.5.0rc9",
+    "semantiva>=0.5.0rc11",
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.20.0",
     "httpx>=0.24.0",
@@ -44,6 +44,7 @@ dev = [
     "pytest >=8.3.4",
     "ruff >=0.1.13",
     "coverage",
+    "types-PyYAML>=6.0.12",
 ]
 
 [tool.pdm.scripts]

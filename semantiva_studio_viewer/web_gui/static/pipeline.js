@@ -1217,6 +1217,10 @@
       
       // Pipeline configuration data state (for metadata display)
       const [pipelineData, setPipelineData] = useState(null);
+      
+      // Identity states (SPLIT: inspection vs trace)
+      const [inspectionIdentity, setInspectionIdentity] = useState(null);
+      const [traceIdentity, setTraceIdentity] = useState(null);
 
       // Resizable panels
       const sidebar = useResizable(400, 200, 600);
@@ -1383,6 +1387,11 @@
             // Store complete pipeline data for metadata display
             setPipelineData(data);
             
+            // Extract inspection identity (YAML SSOT only)
+            if (data && data.identity) {
+              setInspectionIdentity(data.identity);
+            }
+            
             // Store pipeline-level information
             setPipelineInfo(data.pipeline || { has_errors: false, pipeline_errors: [], required_context_keys: [] });
             
@@ -1495,6 +1504,30 @@
             console.log('Trace metadata loaded:', meta);
             setTraceMeta(meta);
             setTraceAvailable(true);
+            
+            // Extract trace identity (Runtime SSOT only)
+            if (meta) {
+              setTraceIdentity({
+                identity: {
+                  run_id: meta.run_id,
+                  pipeline_id: meta.pipeline_id,
+                  semantic_id: meta.semantic_id,
+                  config_id: meta.config_id
+                },
+                run_space: {
+                  launch_id: meta.run_space_launch_id,
+                  attempt: meta.run_space_attempt,
+                  index: meta.run_space_index,
+                  context: meta.run_space_context,
+                  spec_id: meta.run_space_spec_id,
+                  inputs_id: meta.run_space_inputs_id
+                },
+                timing: {
+                  started_at: meta.started_at,
+                  ended_at: meta.ended_at
+                }
+              });
+            }
             
             // Store FQN to UUID mappings
             if (meta.node_mappings && meta.node_mappings.fqn_to_uuid) {
@@ -2256,8 +2289,8 @@
                     gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
                     gap: '12px'
                   }}>
-                    {/* Configuration Identity Card - ALWAYS SHOWN */}
-                    <div style={{
+                    {/* 1. Configuration Identity (YAML) - DEFAULT EXPANDED */}
+                    <details open style={{
                       background: '#f8f9fa',
                       border: '2px solid #d0d0d0',
                       borderRadius: '6px',
@@ -2265,14 +2298,23 @@
                       boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
                       gridColumn: '1 / -1'
                     }}>
-                      <h4 style={{
-                        margin: '0 0 10px 0',
-                        fontSize: '12px',
+                      <summary style={{
+                        cursor: 'pointer',
                         fontWeight: '700',
+                        fontSize: '12px',
                         color: '#555',
                         textTransform: 'uppercase',
-                        letterSpacing: '0.5px'
-                      }}>Configuration Identity</h4>
+                        letterSpacing: '0.5px',
+                        userSelect: 'none',
+                        listStyle: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '10px'
+                      }}>
+                        <span style={{ fontSize: '10px', display: 'inline-block', transition: 'transform 200ms ease' }}>▶</span>
+                        Configuration Identity (YAML)
+                      </summary>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '8px', fontSize: '12px' }}>
                         {/* Configuration File */}
                         {pipelineData && pipelineData.config_file && (
@@ -2293,44 +2335,8 @@
                           </div>
                         )}
                         
-                        {/* Pipeline ID */}
-                        {pipelineData && pipelineData.pipeline_id && (
-                          <div>
-                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Pipeline ID</div>
-                            <div style={{ 
-                              fontFamily: 'monospace', 
-                              color: '#333', 
-                              wordBreak: 'break-all',
-                              padding: '4px 8px',
-                              background: '#ffffff',
-                              borderRadius: '4px',
-                              marginTop: '2px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              border: '1px solid #ddd'
-                            }}>
-                              <span>{truncateHash(pipelineData.pipeline_id)}</span>
-                              <button 
-                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(pipelineData.pipeline_id)} 
-                                style={{ 
-                                  padding: '2px 6px', 
-                                  fontSize: '10px',
-                                  background: '#e0e0e0',
-                                  border: 'none',
-                                  borderRadius: '3px',
-                                  cursor: 'pointer',
-                                  marginLeft: '6px'
-                                }}
-                              >
-                                Copy
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                        
                         {/* Semantic ID */}
-                        {pipelineData && pipelineData.semantic_id && (
+                        {inspectionIdentity && inspectionIdentity.semantic_id && (
                           <div>
                             <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Semantic ID (Structure)</div>
                             <div style={{ 
@@ -2346,9 +2352,9 @@
                               justifyContent: 'space-between',
                               border: '1px solid #ddd'
                             }}>
-                              <span>{truncateHash(pipelineData.semantic_id)}</span>
+                              <span>{truncateHash(inspectionIdentity.semantic_id)}</span>
                               <button 
-                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(pipelineData.semantic_id)} 
+                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(inspectionIdentity.semantic_id)} 
                                 style={{ 
                                   padding: '2px 6px', 
                                   fontSize: '10px',
@@ -2366,9 +2372,9 @@
                         )}
                         
                         {/* Config ID */}
-                        {pipelineData && pipelineData.config_id && (
+                        {inspectionIdentity && inspectionIdentity.config_id && (
                           <div>
-                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Config ID (Configuration)</div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Config ID (Parameters)</div>
                             <div style={{ 
                               fontFamily: 'monospace', 
                               color: '#333', 
@@ -2382,9 +2388,45 @@
                               justifyContent: 'space-between',
                               border: '1px solid #ddd'
                             }}>
-                              <span>{truncateHash(pipelineData.config_id)}</span>
+                              <span>{truncateHash(inspectionIdentity.config_id)}</span>
                               <button 
-                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(pipelineData.config_id)} 
+                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(inspectionIdentity.config_id)} 
+                                style={{ 
+                                  padding: '2px 6px', 
+                                  fontSize: '10px',
+                                  background: '#e0e0e0',
+                                  border: 'none',
+                                  borderRadius: '3px',
+                                  cursor: 'pointer',
+                                  marginLeft: '6px'
+                                }}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Run-Space Config ID */}
+                        {inspectionIdentity && inspectionIdentity.run_space && inspectionIdentity.run_space.spec_id && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Run-Space Config ID</div>
+                            <div style={{ 
+                              fontFamily: 'monospace', 
+                              color: '#333', 
+                              wordBreak: 'break-all',
+                              padding: '4px 8px',
+                              background: '#ffffff',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              border: '1px solid #ddd'
+                            }}>
+                              <span>{truncateHash(inspectionIdentity.run_space.spec_id)}</span>
+                              <button 
+                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(inspectionIdentity.run_space.spec_id)} 
                                 style={{ 
                                   padding: '2px 6px', 
                                   fontSize: '10px',
@@ -2402,7 +2444,7 @@
                         )}
                         
                         {/* Required Context Keys */}
-                        {pipelineInfo && pipelineInfo.required_context_keys && pipelineInfo.required_context_keys.length > 0 && (
+                        {pipelineData && pipelineData.required_context_keys && pipelineData.required_context_keys.length > 0 && (
                           <div style={{ gridColumn: '1 / -1' }}>
                             <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Required Context Keys</div>
                             <div style={{ 
@@ -2415,30 +2457,40 @@
                               fontFamily: 'monospace',
                               fontSize: '11px'
                             }}>
-                              {pipelineInfo.required_context_keys.join(', ')}
+                              {pipelineData.required_context_keys.join(', ')}
                             </div>
                           </div>
                         )}
                       </div>
-                    </div>
+                    </details>
                     
-                    {/* Runtime Execution Card - Only show when trace available */}
-                    {traceMeta && (
-                    <div style={{
+                    {/* 2. Runtime Execution - DEFAULT COLLAPSED */}
+                    {traceIdentity && (
+                    <details style={{
                       background: 'white',
                       border: '1px solid #e0e0e0',
                       borderRadius: '6px',
                       padding: '12px',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                      gridColumn: '1 / -1'
                     }}>
-                      <h4 style={{
-                        margin: '0 0 10px 0',
-                        fontSize: '12px',
+                      <summary style={{
+                        cursor: 'pointer',
                         fontWeight: '700',
+                        fontSize: '12px',
                         color: '#333',
                         textTransform: 'uppercase',
-                        letterSpacing: '0.5px'
-                      }}>Runtime Execution</h4>
+                        letterSpacing: '0.5px',
+                        userSelect: 'none',
+                        listStyle: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '10px'
+                      }}>
+                        <span style={{ fontSize: '10px', display: 'inline-block', transition: 'transform 200ms ease' }}>▶</span>
+                        Runtime Execution
+                      </summary>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
                         <div>
                           <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Run ID</div>
@@ -2454,9 +2506,9 @@
                             alignItems: 'center',
                             justifyContent: 'space-between'
                           }}>
-                            <span>{truncateHash(traceMeta.run_id)}</span>
+                            <span>{truncateHash(traceIdentity.identity.run_id)}</span>
                             <button 
-                              onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceMeta.run_id)} 
+                              onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceIdentity.identity.run_id)} 
                               style={{ 
                                 padding: '2px 6px', 
                                 fontSize: '10px',
@@ -2472,8 +2524,43 @@
                           </div>
                         </div>
                         
+                        {/* Pipeline ID (runtime) */}
+                        {traceIdentity.identity.pipeline_id && (
+                          <div>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Pipeline ID</div>
+                            <div style={{ 
+                              fontFamily: 'monospace', 
+                              color: '#333', 
+                              wordBreak: 'break-all',
+                              padding: '4px 8px',
+                              background: '#f5f5f5',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between'
+                            }}>
+                              <span>{truncateHash(traceIdentity.identity.pipeline_id)}</span>
+                              <button 
+                                onClick={() => navigator.clipboard && navigator.clipboard.writeText(traceIdentity.identity.pipeline_id)} 
+                                style={{ 
+                                  padding: '2px 6px', 
+                                  fontSize: '10px',
+                                  background: '#e0e0e0',
+                                  border: 'none',
+                                  borderRadius: '3px',
+                                  cursor: 'pointer',
+                                  marginLeft: '6px'
+                                }}
+                              >
+                                Copy
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        
                         {/* Timestamps */}
-                        {traceMeta.started_at && (
+                        {traceIdentity.timing && traceIdentity.timing.started_at && (
                           <div>
                             <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Started</div>
                             <div style={{ 
@@ -2485,12 +2572,12 @@
                               fontFamily: 'monospace',
                               fontSize: '11px'
                             }}>
-                              {traceMeta.started_at}
+                              {traceIdentity.timing.started_at}
                             </div>
                           </div>
                         )}
                         
-                        {traceMeta.ended_at && (
+                        {traceIdentity.timing && traceIdentity.timing.ended_at && (
                           <div>
                             <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Ended</div>
                             <div style={{ 
@@ -2502,7 +2589,7 @@
                               fontFamily: 'monospace',
                               fontSize: '11px'
                             }}>
-                              {traceMeta.ended_at}
+                              {traceIdentity.timing.ended_at}
                             </div>
                           </div>
                         )}
@@ -2519,26 +2606,26 @@
                             fontSize: '11px',
                             fontWeight: '600'
                           }}>
-                            {traceMeta.ended_at ? 'Completed' : 'Running'}
+                            {traceIdentity.timing && traceIdentity.timing.ended_at ? 'Completed' : 'Running'}
                           </div>
                         </div>
                         
                         {/* Context Values - Always show if trace available */}
-                        <div style={{ gridColumn: '1 / -1' }}>
-                          <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Context Values</div>
-                          <div style={{ 
-                            fontFamily: 'monospace', 
-                            color: '#333', 
-                            padding: '4px 8px',
-                            background: '#f5f5f5',
-                            borderRadius: '4px',
-                            marginTop: '2px',
-                            fontSize: '11px',
-                            maxWidth: '100%',
-                            overflow: 'auto'
-                          }}>
-                            {traceMeta.run_space_context ? (
-                              Object.entries(traceMeta.run_space_context)
+                        {traceIdentity.run_space && traceIdentity.run_space.context && (
+                          <div style={{ gridColumn: '1 / -1' }}>
+                            <div style={{ color: '#666', fontSize: '11px', fontWeight: '600' }}>Context Values</div>
+                            <div style={{ 
+                              fontFamily: 'monospace', 
+                              color: '#333', 
+                              padding: '4px 8px',
+                              background: '#f5f5f5',
+                              borderRadius: '4px',
+                              marginTop: '2px',
+                              fontSize: '11px',
+                              maxWidth: '100%',
+                              overflow: 'auto'
+                            }}>
+                              {Object.entries(traceIdentity.run_space.context)
                                 .map(([k, v]) => {
                                   // Handle objects by stringifying them
                                   const valueStr = typeof v === 'object' && v !== null 
@@ -2546,21 +2633,94 @@
                                     : String(v);
                                   return `${k}: ${valueStr}`;
                                 })
-                                .join(', ')
-                            ) : traceMeta.pipeline_input_context_repr ? (
-                              traceMeta.pipeline_input_context_repr
-                            ) : (
-                              <span style={{ color: '#999', fontStyle: 'italic' }}>No context values available</span>
-                            )}
+                                .join(', ')}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
-                    </div>
+                    </details>
+                    )}
+                    
+                    {/* 3. Identity Health (YAML ↔ Trace) - DEFAULT COLLAPSED */}
+                    {inspectionIdentity && traceIdentity && (
+                      <details style={{
+                        background: 'white',
+                        border: '2px solid #5856d6',
+                        borderRadius: '6px',
+                        padding: '12px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                        gridColumn: '1 / -1'
+                      }}>
+                        <summary style={{
+                          cursor: 'pointer',
+                          fontWeight: '700',
+                          fontSize: '12px',
+                          color: '#5856d6',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                          userSelect: 'none',
+                          listStyle: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          marginBottom: '10px'
+                        }}>
+                          <span style={{ fontSize: '10px', display: 'inline-block', transition: 'transform 200ms ease' }}>▶</span>
+                          Identity Health (YAML ↔ Trace)
+                        </summary>
+                        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '12px' }}>
+                          {inspectionIdentity.semantic_id && traceIdentity.identity && traceIdentity.identity.semantic_id && (
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '6px 12px',
+                              borderRadius: '4px',
+                              background: inspectionIdentity.semantic_id === traceIdentity.identity.semantic_id ? '#d4edda' : '#f8d7da',
+                              border: `1px solid ${inspectionIdentity.semantic_id === traceIdentity.identity.semantic_id ? '#28a745' : '#dc3545'}`
+                            }}>
+                              <span style={{ fontSize: '14px' }}>{inspectionIdentity.semantic_id === traceIdentity.identity.semantic_id ? '✓' : '✗'}</span>
+                              <span style={{ fontWeight: '600' }}>Semantic ID</span>
+                              <span style={{ opacity: 0.7 }}>{inspectionIdentity.semantic_id === traceIdentity.identity.semantic_id ? 'Match' : 'Differs'}</span>
+                            </div>
+                          )}
+                          {inspectionIdentity.config_id && traceIdentity.identity && traceIdentity.identity.config_id && (
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '6px 12px',
+                              borderRadius: '4px',
+                              background: inspectionIdentity.config_id === traceIdentity.identity.config_id ? '#fff3cd' : '#f8d7da',
+                              border: `1px solid ${inspectionIdentity.config_id === traceIdentity.identity.config_id ? '#ffc107' : '#dc3545'}`
+                            }}>
+                              <span style={{ fontSize: '14px' }}>{inspectionIdentity.config_id === traceIdentity.identity.config_id ? '⚠' : '✗'}</span>
+                              <span style={{ fontWeight: '600' }}>Config ID</span>
+                              <span style={{ opacity: 0.7 }}>{inspectionIdentity.config_id === traceIdentity.identity.config_id ? 'Match (expected variation)' : 'Differs'}</span>
+                            </div>
+                          )}
+                          {inspectionIdentity.run_space && inspectionIdentity.run_space.spec_id && traceIdentity.run_space && traceIdentity.run_space.spec_id && (
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '6px 12px',
+                              borderRadius: '4px',
+                              background: inspectionIdentity.run_space.spec_id === traceIdentity.run_space.spec_id ? '#d4edda' : '#f8d7da',
+                              border: `1px solid ${inspectionIdentity.run_space.spec_id === traceIdentity.run_space.spec_id ? '#28a745' : '#dc3545'}`
+                            }}>
+                              <span style={{ fontSize: '14px' }}>{inspectionIdentity.run_space.spec_id === traceIdentity.run_space.spec_id ? '✓' : '✗'}</span>
+                              <span style={{ fontWeight: '600' }}>Run-Space Plan</span>
+                              <span style={{ opacity: 0.7 }}>{inspectionIdentity.run_space.spec_id === traceIdentity.run_space.spec_id ? 'Match' : 'Differs'}</span>
+                            </div>
+                          )}
+                        </div>
+                      </details>
                     )}
 
-                    {/* Run-Space Configuration - Collapsible Section */}
+                    {/* 4. Run-Space Configuration - DEFAULT COLLAPSED (already using details) */}
                     {((runSpaces.length > 0 || hasRunsWithoutRunSpace) || (pipelineData && pipelineData.run_space_config)) && (
-                      <details open style={{
+                      <details style={{
                         background: 'white',
                         border: '1px solid #e0e0e0',
                         borderRadius: '6px',
@@ -2579,9 +2739,10 @@
                           listStyle: 'none',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '8px'
+                          gap: '8px',
+                          marginBottom: '10px'
                         }}>
-                          <span style={{ fontSize: '10px' }}>▶</span>
+                          <span style={{ fontSize: '10px', display: 'inline-block', transition: 'transform 200ms ease' }}>▶</span>
                           Run-Space Configuration
                         </summary>
                         
@@ -3059,22 +3220,32 @@
                       </details>
                     )}
 
-                    {/* Controls Card - VISUALIZATION */}
-                    <div style={{
+                    {/* 5. Options (renamed from Visualization) - DEFAULT COLLAPSED */}
+                    <details style={{
                       background: 'white',
                       border: '1px solid #e0e0e0',
                       borderRadius: '6px',
                       padding: '12px',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                      gridColumn: '1 / -1'
                     }}>
-                      <h4 style={{
-                        margin: '0 0 10px 0',
-                        fontSize: '12px',
+                      <summary style={{
+                        cursor: 'pointer',
                         fontWeight: '700',
+                        fontSize: '12px',
                         color: '#333',
                         textTransform: 'uppercase',
-                        letterSpacing: '0.5px'
-                      }}>Visualization</h4>
+                        letterSpacing: '0.5px',
+                        userSelect: 'none',
+                        listStyle: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '10px'
+                      }}>
+                        <span style={{ fontSize: '10px', display: 'inline-block', transition: 'transform 200ms ease' }}>▶</span>
+                        Options
+                      </summary>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <button
                           onClick={() => setTraceOverlayVisible(!traceOverlayVisible)}
@@ -3093,7 +3264,7 @@
                           {traceOverlayVisible ? '✓ Overlay Visible' : '✗ Overlay Hidden'}
                         </button>
                       </div>
-                    </div>
+                    </details>
                   </div>
                 )}
               </div>

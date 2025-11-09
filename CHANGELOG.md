@@ -6,7 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased] - TBD
 
+### Fixed
+- **Identity Handling**: Removed local identity recomputation; no runtime IDs (`pipeline_id`, `run_id`) in inspection mode
+  - `/api/pipeline` now uses official identity from `semantiva.inspection.build()` (YAML SSOT)
+  - Fixed trace adapter fallbacks: `semantic_id` no longer substituted with `config_id`
+  - `config_id` correctly uses `pipeline_config_id` as alias fallback only
+  - Ensures deterministic identity computation across viewer sessions
+
 ### Added
+- **Identity Health**: YAML↔Trace consistency badges when both sources available
+  - Semantic ID match badge (✓ green for match, ✗ red for mismatch)
+  - Config ID match badge (⚠ yellow for expected variation, ✗ red for mismatch)
+  - Run-Space Plan match badge (✓ green for match, ✗ red for mismatch)
+  - Helps diagnose wrong YAML used to inspect trace or parameter drift
+- **Identity Sources Documentation**: New README section explaining YAML vs Trace identity sources
+  - Links to Core Identity Cheatsheet in main Semantiva documentation
+  - Clarifies when each identity source is used and what each ID represents
 - **Run-Space Configuration Panel**: Pipeline Metadata panel now displays run-space configuration
   - Shows run-space identities (Spec ID, Launch ID, Inputs ID) with copyable values
   - Displays configuration (combine mode, planned/total runs, max runs limit)
@@ -48,4 +63,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - Export functionality tests
   - Pipeline visualization tests
   - Component hierarchy tests
+
+### Changed
+- **Frontend Identity State**: Split identity into `inspectionIdentity` (YAML) and `traceIdentity` (Runtime)
+  - Configuration Identity card now shows YAML-only fields (`semantic_id`, `config_id`, `run_space.spec_id`)
+  - Runtime Execution card shows trace-only fields (`run_id`, `pipeline_id`, timestamps, context)
+  - Identity Health section appears when both sources available for comparison
+- **Trace Adapter**: Improved identity mapping consistency with Semantiva Core
+  - `semantic_id` extraction without fallback (can be `None`)
+  - `config_id` prefers explicit field, falls back to `pipeline_config_id` alias
+  - Prevents identity conflation and follows schema properly
 
